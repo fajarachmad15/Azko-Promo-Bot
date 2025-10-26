@@ -1,7 +1,6 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread 
-from google.generativeai.errors import APIError
 
 # --- BAGIAN 1: PENYIAPAN & KONEKSI ---
 
@@ -17,7 +16,7 @@ def get_promo_data_from_sheet():
         gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
-        sh = gc.open_by_url("MASUKKAN_URL_GOOGLE_SHEET_PROMO_ANDA_DI_SINI")
+        sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing")
         
         worksheet = sh.sheet1
         data = worksheet.get_all_values()
@@ -86,6 +85,5 @@ try:
         with st.chat_message("Bot"):
             st.markdown(response.text)
 
-except APIError as e:
-    # Jika API Key Gemini Error (misalnya key habis masa berlaku)
-    st.error(f"Error Koneksi Gemini: {e}")
+except Exception as e:
+        st.error(f"Error AI: Terjadi kesalahan saat mengirim pesan. Coba lagi.")
