@@ -1,76 +1,91 @@
 import google.generativeai as genai
-import streamlit as st  # Kita import streamlit
+import streamlit as st
+import gspread 
+from google.generativeai.errors import APIError
 
-# --- BAGIAN 1: PENYIAPAN (Sama seperti sebelumnya) ---
+# --- BAGIAN 1: PENYIAPAN & KONEKSI ---
 
-# 1. Masukkan API Key Anda (pakai tanda kutip!)
-# CARA LEBIH AMAN: Gunakan st.secrets
-# Untuk sekarang, kita tulis langsung (tapi jangan bagikan file ini)
+# 1. Masukkan API Key Anda (dari Streamlit Secrets)
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# 2. Instruksi Promo (Sama seperti sebelumnya)
-instruksi_promo = """
-User
-Anda adalah "Asisten Promo AZKO", petugas informasi yang ramah, ringkas, dan sangat akurat. Tugas utama Anda adalah menjawab semua pertanyaan pengguna HANYA berdasarkan data promosi BNI Wondr - Azko yang Anda miliki.
+# 2. Fungsi untuk mendapatkan data dari Google Sheets
+# @st.cache_data memastikan fungsi ini hanya berjalan sekali per 10 menit
+@st.cache_data(ttl=600) 
+def get_promo_data_from_sheet():
+    try:
+        # Menggunakan kunci rahasia yang tersimpan di Streamlit Secrets
+        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        
+        # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
+        sh = gc.open_by_url("MASUKKAN_URL_GOOGLE_SHEET_PROMO_ANDA_DI_SINI")
+        
+        worksheet = sh.sheet1
+        data = worksheet.get_all_values()
+        
+        # Kumpulkan data menjadi teks yang rapi (format yang dimengerti AI)
+        promo_text = "DATA PROMO AKTIF:\n"
+        
+        # Memproses data (mengabaikan header [0] dan promo NONAKTIF)
+        for row in data[1:]: 
+            # Pastikan baris memiliki 6 kolom dan statusnya AKTIF
+            if len(row) >= 6 and row[0].upper() == 'AKTIF':
+                promo_text += (
+                    f"- Nama: {row[1]}, Periode: {row[2]}, Syarat: {row[3]}, "
+                    f"Diskon: {row[4]}, Provider: {row[5]}\n"
+                )
+        
+        return promo_text
 
-DATA PROMO:
-
-1. Nama Promo: Potongan Rp 70.000 dengan minimal transaksi Rp 700.000 menggunakan Aplikasi BNI Wondr.
-2. Periode Promo: HANYA 1 hari, yaitu 4 September 2025.
-3. Metode Pembayaran (MOP): DISC 70 RB WONDR HARPELNAS - BNI QR.
-4. Wajib menggunakan EDC BNI.
-5. Berlaku di: Seluruh Store AZKO JABODETABEK.
-6. Mekanisme Diskon:
-    o Berlaku 1 kali per pengguna/user.
-    o Tidak berlaku kelipatan dan pemisahan struk transaksi.
-    o Hanya berlaku untuk pembelian menggunakan BNI QR dari Aplikasi BNI Wondr.
-    o TIDAK berlaku untuk pembelian menggunakan BNI Mobile Banking.
-7. Kuotasi: Kuota dibatasi 7 orang per store. Store wajib membuat tracking manual.
-
-ATURAN RESPON:
-
-    o Selalu gunakan bahasa yang sopan dan profesional.
-    o Jika pengguna bertanya di luar topik promo ini (misalnya, tentang produk, jam buka toko, atau promo bank lain), JANGAN menjawab. Balas dengan: "Maaf, saya hanya dapat memberikan informasi detail mengenai Promo Potongan BNI Wondr - Azko pada tanggal 4 September 2025."
-    o Pastikan semua detail angka (potongan, minimal transaksi, tanggal, kuota) benar-benar akurat sesuai data di atas.
-"""
-
-# 3. Buat modelnya DENGAN instruksi itu
-model = genai.GenerativeModel(
-    model_name='models/gemini-flash-latest',
-    system_instruction=instruksi_promo
-)
-
-
+    except Exception as e:
+        # Jika ada error koneksi Sheet, gunakan instruksi cadangan
+        st.error(f"Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
+        return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
+        
 # --- BAGIAN 2: APLIKASI WEB STREAMLIT ---
 
-# 1. Beri judul pada halaman web
-st.title("🤖 Asisten Promo Kasir AZKO")
-st.caption("Didukung oleh Gemini AI")
+# 1. Dapatkan data terbaru dari Sheets
+promo_terbaru = get_promo_data_from_sheet() 
 
-# 2. Siapkan "memori" untuk menyimpan riwayat chat
-# Ini penting agar bot ingat obrolan sebelumnya
-if "chat" not in st.session_state:
-    # Mulai sesi obrolan baru
-    st.session_state.chat = model.start_chat(history=[])
+# 2. Gabungkan instruksi tetap dengan data terbaru dari Sheets
+instruksi_penuh = (
+    "Anda adalah Asisten Promo AZKO. Tugasmu menjawab HANYA berdasarkan data promo yang diberikan.\n\n" + 
+    promo_terbaru + 
+    "\n\nATURAN RESPON: " + 
+    "Selalu gunakan bahasa sopan, singkat dan jelas. " + 
+    "JANGAN jawab di luar topik promo. Jika di luar topik, balas 'Maaf, saya hanya bisa memberikan informasi promo saat ini.'"
+)
 
-# 3. Tampilkan riwayat chat yang sudah ada
-for message in st.session_state.chat.history:
-    # Tampilkan pesan berdasarkan peran (user atau model)
-    role = "Anda" if message.role == "user" else "Bot"
-    with st.chat_message(role):
-        st.markdown(message.parts[0].text)
+try:
+    # 3. Buat modelnya DENGAN instruksi gabungan
+    model = genai.GenerativeModel(
+        model_name='models/gemini-flash-latest',
+        system_instruction=instruksi_penuh
+    )
 
-# 4. Buat kotak input teks di bagian bawah layar
-pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
+    st.title("🤖 Asisten Promo Kasir AZKO")
+    st.caption("Didukung oleh Gemini AI & Google Sheets")
 
-if pertanyaan_kasir:
-    # 5. Tampilkan pertanyaan kasir di layar
-    with st.chat_message("Anda"):
-        st.markdown(pertanyaan_kasir)
+    # 4. Siapkan "memori" dan tampilkan riwayat chat
+    if "chat" not in st.session_state:
+        st.session_state.chat = model.start_chat(history=[])
 
-    # 6. Kirim pertanyaan ke AI dan dapatkan jawaban
-    response = st.session_state.chat.send_message(pertanyaan_kasir)
+    for message in st.session_state.chat.history:
+        role = "Anda" if message.role == "user" else "Bot"
+        with st.chat_message(role):
+            st.markdown(message.parts[0].text)
 
-    # 7. Tampilkan jawaban AI di layar
-    with st.chat_message("Bot"):
-        st.markdown(response.text)
+    # 5. Kotak input teks
+    pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
+
+    if pertanyaan_kasir:
+        with st.chat_message("Anda"):
+            st.markdown(pertanyaan_kasir)
+
+        response = st.session_state.chat.send_message(pertanyaan_kasir)
+
+        with st.chat_message("Bot"):
+            st.markdown(response.text)
+
+except APIError as e:
+    # Jika API Key Gemini Error (misalnya key habis masa berlaku)
+    st.error(f"Error Koneksi Gemini: {e}")
