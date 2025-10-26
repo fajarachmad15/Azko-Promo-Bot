@@ -1,6 +1,6 @@
 import google.generativeai as genai
 import streamlit as st
-import gspread 
+import gspread
 
 # --- BAGIAN 1: PENYIAPAN & KONEKSI ---
 
@@ -12,8 +12,16 @@ genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 @st.cache_data(ttl=600) 
 def get_promo_data_from_sheet():
     try:
-        # Menggunakan kunci rahasia yang tersimpan di Streamlit Secrets
-        gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+        # Perbaikan di sini: Ambil, bersihkan private_key, lalu kirim ke gspread
+        # 1. Ambil seluruh blok rahasia sebagai string
+        secrets_dict = st.secrets["gcp_service_account"].to_dict()
+
+        # 2. Konversi private_key (yang masih ada \n) menjadi format yang benar
+        #    dengan menambahkan replace('\\n', '\n')
+        secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
+
+        # 3. Buat Service Account dari dictionary yang sudah dimurnikan
+        gc = gspread.service_account_from_dict(secrets_dict)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
         sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing")
@@ -36,7 +44,7 @@ def get_promo_data_from_sheet():
         return promo_text
 
     except Exception as e:
-        # Jika ada error koneksi Sheet, gunakan instruksi cadangan
+        # ... (Kode error cadangan Anda) ...
         st.error(f"Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
