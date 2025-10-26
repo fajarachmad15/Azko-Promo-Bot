@@ -1,24 +1,29 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
+import json # <-- Import library JSON untuk mem-parsing string Service Account
 
 # --- BAGIAN 1: PENYIAPAN & KONEKSI ---
 
 # 1. Masukkan API Key Anda (dari Streamlit Secrets)
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+# Pastikan Anda memiliki key 'GEMINI_API_KEY' di secrets.toml/Streamlit Cloud
+try:
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+except KeyError:
+    st.error("Error: Kunci 'GEMINI_API_KEY' tidak ditemukan di st.secrets. Mohon periksa kembali konfigurasi secrets Anda.")
+    st.stop() # Hentikan aplikasi jika API Key tidak ada
+
 
 # 2. Fungsi untuk mendapatkan data dari Google Sheets
-# @st.cache_data memastikan fungsi ini hanya berjalan sekali per 10 menit
 @st.cache_data(ttl=600) 
 def get_promo_data_from_sheet():
     try:
-        # Perbaikan di sini: Ambil, bersihkan private_key, lalu kirim ke gspread
-        # 1. Ambil seluruh blok rahasia sebagai string
-        secrets_dict = st.secrets["gcp_service_account"].to_dict()
-
-        # 2. Konversi private_key (yang masih ada \n) menjadi format yang benar
-        #    dengan menambahkan replace('\\n', '\n')
-        secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
+        # 1. Ambil string JSON Service Account dari st.secrets
+        # Kunci 'gcp_service_account' sekarang harus berisi string JSON utuh
+        sa_json_string = st.secrets["gcp_service_account"]
+        
+        # 2. Ubah string JSON menjadi dictionary Python
+        secrets_dict = json.loads(sa_json_string)
 
         # 3. Buat Service Account dari dictionary yang sudah dimurnikan
         gc = gspread.service_account_from_dict(secrets_dict)
@@ -34,7 +39,7 @@ def get_promo_data_from_sheet():
         
         # Memproses data (mengabaikan header [0] dan promo NONAKTIF)
         for row in data[1:]: 
-            # Pastikan baris memiliki 6 kolom dan statusnya AKTIF
+            # Pastikan baris memiliki 6 kolom dan statusnya AKTIF (Kolom A)
             if len(row) >= 6 and row[0].upper() == 'AKTIF':
                 promo_text += (
                     f"- Nama: {row[1]}, Periode: {row[2]}, Syarat: {row[3]}, "
@@ -43,8 +48,16 @@ def get_promo_data_from_sheet():
         
         return promo_text
 
+    except KeyError:
+        # Menangkap error jika kunci 'gcp_service_account' tidak ditemukan
+        st.error(
+            "Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan di st.secrets. "
+            "Pastikan Anda telah menambahkannya ke secrets.toml atau di Streamlit Cloud."
+        )
+        return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
+
     except Exception as e:
-        # ... (Kode error cadangan Anda) ...
+        # Menangkap error umum (misalnya masalah koneksi atau parsing JSON)
         st.error(f"Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
@@ -65,7 +78,7 @@ instruksi_penuh = (
 try:
     # 3. Buat modelnya DENGAN instruksi gabungan
     model = genai.GenerativeModel(
-        model_name='models/gemini-flash-latest',
+        model_name='gemini-2.5-flash', # Menggunakan model yang lebih baru dan efisien
         system_instruction=instruksi_penuh
     )
 
@@ -94,4 +107,4 @@ try:
             st.markdown(response.text)
 
 except Exception as e:
-        st.error(f"Error AI: Terjadi kesalahan saat mengirim pesan. Coba lagi.")
+    st.error(f"Error AI: Terjadi kesalahan pada konfigurasi atau saat mengirim pesan ke Gemini. Error: {e}")
