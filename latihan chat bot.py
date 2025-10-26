@@ -6,7 +6,7 @@ import streamlit as st  # Kita import streamlit
 # 1. Masukkan API Key Anda (pakai tanda kutip!)
 # CARA LEBIH AMAN: Gunakan st.secrets
 # Untuk sekarang, kita tulis langsung (tapi jangan bagikan file ini)
-genai.configure(api_key=api_key=st.secrets["GEMINI_API_KEY"])
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 # 2. Instruksi Promo (Sama seperti sebelumnya)
 instruksi_promo = """
