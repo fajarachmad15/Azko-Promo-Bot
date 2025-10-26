@@ -1,40 +1,51 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
-import json # <-- Import library JSON untuk mem-parsing string Service Account
+import json # Diperlukan untuk memproses string JSON dari secrets
 
-# --- BAGIAN 1: PENYIAPAN & KONEKSI ---
+# --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
-# 1. Masukkan API Key Anda (dari Streamlit Secrets)
-# Pastikan Anda memiliki key 'GEMINI_API_KEY' di secrets.toml/Streamlit Cloud
+# 1. Konfigurasi Model Gemini
 try:
+    # Masukkan API Key Anda (dari Streamlit Secrets)
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except KeyError:
-    st.error("Error: Kunci 'GEMINI_API_KEY' tidak ditemukan di st.secrets. Mohon periksa kembali konfigurasi secrets Anda.")
+    st.error("❌ ERROR: Kunci 'GEMINI_API_KEY' tidak ditemukan. Mohon periksa kembali konfigurasi secrets Anda.")
     st.stop() # Hentikan aplikasi jika API Key tidak ada
 
 
 # 2. Fungsi untuk mendapatkan data dari Google Sheets
-@st.cache_data(ttl=600) 
+@st.cache_data(ttl=600) # Data akan di-cache selama 10 menit
 def get_promo_data_from_sheet():
+    """Mengambil data promo dari Google Sheets menggunakan Service Account."""
+    
     try:
         # 1. Ambil string JSON Service Account dari st.secrets
-        # Kunci 'gcp_service_account' sekarang harus berisi string JSON utuh
         sa_json_string = st.secrets["gcp_service_account"]
         
         # 2. Ubah string JSON menjadi dictionary Python
         secrets_dict = json.loads(sa_json_string)
 
-        # 3. Buat Service Account dari dictionary yang sudah dimurnikan
+        # ----------------------------------------------------
+        # PERBAIKAN PENTING UNTUK MENGATASI 'Invalid control character'
+        # Membersihkan private_key dari \n ganda yang mungkin tersisa
+        # ----------------------------------------------------
+        if "private_key" in secrets_dict:
+            # Mengganti karakter \n ganda (jika ada) menjadi \n tunggal 
+            # (format yang dibutuhkan gspread)
+            secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
+
+        # 3. Buat Service Account client
         gc = gspread.service_account_from_dict(secrets_dict)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
-        sh = gc.open_by_url("https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing")
+        SHEET_URL = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
+        sh = gc.open_by_url(SHEET_URL)
         
         worksheet = sh.sheet1
         data = worksheet.get_all_values()
         
-        # Kumpulkan data menjadi teks yang rapi (format yang dimengerti AI)
+        # Kumpulkan data menjadi teks yang rapi untuk prompt AI
         promo_text = "DATA PROMO AKTIF:\n"
         
         # Memproses data (mengabaikan header [0] dan promo NONAKTIF)
@@ -49,19 +60,19 @@ def get_promo_data_from_sheet():
         return promo_text
 
     except KeyError:
-        # Menangkap error jika kunci 'gcp_service_account' tidak ditemukan
         st.error(
-            "Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan di st.secrets. "
-            "Pastikan Anda telah menambahkannya ke secrets.toml atau di Streamlit Cloud."
+            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan. "
+            "Pastikan secrets.toml sudah diubah menjadi format JSON string."
         )
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Menangkap error umum (misalnya masalah koneksi atau parsing JSON)
-        st.error(f"Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
+        # Menangkap error umum (termasuk error parsing JSON yang baru)
+        st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
-# --- BAGIAN 2: APLIKASI WEB STREAMLIT ---
+
+# --- BAGIAN 2: APLIKASI WEB STREAMLIT UTAMA ---
 
 # 1. Dapatkan data terbaru dari Sheets
 promo_terbaru = get_promo_data_from_sheet() 
@@ -78,19 +89,21 @@ instruksi_penuh = (
 try:
     # 3. Buat modelnya DENGAN instruksi gabungan
     model = genai.GenerativeModel(
-        model_name='gemini-2.5-flash', # Menggunakan model yang lebih baru dan efisien
+        model_name='gemini-2.5-flash', 
         system_instruction=instruksi_penuh
     )
 
     st.title("🤖 Asisten Promo Kasir AZKO")
     st.caption("Didukung oleh Gemini AI & Google Sheets")
 
-    # 4. Siapkan "memori" dan tampilkan riwayat chat
+    # 4. Siapkan "memori" (session_state chat)
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat(history=[])
 
+    # Tampilkan riwayat chat
     for message in st.session_state.chat.history:
-        role = "Anda" if message.role == "user" else "Bot"
+        # Gunakan 'user' dan 'assistant' sebagai role name untuk keseragaman UI
+        role = "user" if message.role == "user" else "assistant"
         with st.chat_message(role):
             st.markdown(message.parts[0].text)
 
@@ -98,13 +111,16 @@ try:
     pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
 
     if pertanyaan_kasir:
-        with st.chat_message("Anda"):
+        # Tampilkan pesan user
+        with st.chat_message("user"):
             st.markdown(pertanyaan_kasir)
 
+        # Kirim pesan ke Gemini dan dapatkan respons
         response = st.session_state.chat.send_message(pertanyaan_kasir)
 
-        with st.chat_message("Bot"):
+        # Tampilkan respons bot
+        with st.chat_message("assistant"):
             st.markdown(response.text)
 
 except Exception as e:
-    st.error(f"Error AI: Terjadi kesalahan pada konfigurasi atau saat mengirim pesan ke Gemini. Error: {e}")
+    st.error(f"❌ Error AI: Terjadi kesalahan pada konfigurasi atau saat mengirim pesan ke Gemini. Error: {e}")
