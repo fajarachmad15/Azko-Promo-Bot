@@ -1,7 +1,7 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
-import json # Diperlukan untuk memproses string JSON dari secrets
+import json # Meskipun tidak digunakan untuk parsing secrets, ini dapat dipertahankan untuk jaga-jaga
 
 # --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
@@ -20,22 +20,14 @@ def get_promo_data_from_sheet():
     """Mengambil data promo dari Google Sheets menggunakan Service Account."""
     
     try:
-        # 1. Ambil string JSON Service Account dari st.secrets
-        sa_json_string = st.secrets["gcp_service_account"]
+        # KREDENSIAL SEKARANG DIAMBIL SEBAGAI DICTIONARY PYTHON
+        # DARI FORMAT TOML [gcp_service_account]
+        secrets_dict = st.secrets["gcp_service_account"]
         
-        # 2. Ubah string JSON menjadi dictionary Python
-        secrets_dict = json.loads(sa_json_string)
+        # TIDAK PERLU lagi kode json.loads atau .replace untuk private_key
+        # karena format TOML multi-line sudah menanganinya dengan benar
 
-        # ----------------------------------------------------
-        # PERBAIKAN PENTING UNTUK MENGATASI 'Invalid control character'
-        # Membersihkan private_key dari \n ganda yang mungkin tersisa
-        # ----------------------------------------------------
-        if "private_key" in secrets_dict:
-            # Mengganti karakter \n ganda (jika ada) menjadi \n tunggal 
-            # (format yang dibutuhkan gspread)
-            secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
-
-        # 3. Buat Service Account client
+        # Buat Service Account client
         gc = gspread.service_account_from_dict(secrets_dict)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
@@ -59,15 +51,15 @@ def get_promo_data_from_sheet():
         
         return promo_text
 
-    except KeyError:
+    except KeyError as e:
         st.error(
-            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan. "
-            "Pastikan secrets.toml sudah diubah menjadi format JSON string."
+            f"❌ Gagal memuat data Sheets. Kunci {e} tidak ditemukan. "
+            "Pastikan secrets.toml sudah diubah ke format TOML."
         )
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Menangkap error umum (termasuk error parsing JSON yang baru)
+        # Menangkap error umum (seperti masalah koneksi gspread)
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
@@ -88,8 +80,9 @@ instruksi_penuh = (
 
 try:
     # 3. Buat modelnya DENGAN instruksi gabungan
+    # MENGGUNAKAN model/gemini-flash-latest sesuai permintaan Anda
     model = genai.GenerativeModel(
-        model_name='gemini-2.5-flash', 
+        model_name='models/gemini-flash-latest', 
         system_instruction=instruksi_penuh
     )
 
