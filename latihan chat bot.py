@@ -1,7 +1,6 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
-import json 
 
 # --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
@@ -9,74 +8,63 @@ import json
 try:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except KeyError:
-    st.error("❌ ERROR: Kunci 'GEMINI_API_KEY' tidak ditemukan.")
+    st.error("❌ ERROR: Kunci 'GEMINI_API_KEY' tidak ditemukan di secrets.")
     st.stop()
 
-
-# 2. Fungsi untuk mendapatkan data dari Google Sheets
+# 2. Fungsi untuk mengambil data dari Google Sheets
 @st.cache_data(ttl=600)
 def get_promo_data_from_sheet():
-    
     try:
-        # Mengambil kredensial sebagai Dictionary Python langsung dari st.secrets TOML
-        secrets_dict = st.secrets["gcp_service_account"]
-        
-        # Buat Service Account client (gspread akan memproses private_key)
-        gc = gspread.service_account_from_dict(secrets_dict)
-        
-        # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
-        SHEET_URL = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
-        sh = gc.open_by_url(SHEET_URL)
-        
+        # Ambil kredensial GCP dari secrets
+        creds = dict(st.secrets["gcp_service_account"])
+        # Pastikan private_key diformat benar (hilangkan escape newline)
+        creds["private_key"] = creds["private_key"].replace("\\n", "\n")
+
+        # Koneksi ke Google Sheets
+        gc = gspread.service_account_from_dict(creds)
+        sheet_url = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
+        sh = gc.open_by_url(sheet_url)
         worksheet = sh.sheet1
         data = worksheet.get_all_values()
-        
-        # Kumpulkan data menjadi teks
-        promo_text = "DATA PROMO AKTIF:\n"
-        
-        # Memproses data
-        for row in data[1:]: 
-            if len(row) >= 6 and row[0].upper() == 'AKTIF':
-                promo_text += (
-                    f"- Nama: {row[1]}, Periode: {row[2]}, Syarat: {row[3]}, "
-                    f"Diskon: {row[4]}, Provider: {row[5]}\n"
-                )
-        
-        return promo_text
 
-    except KeyError as e:
-        st.error(f"❌ Gagal memuat data Sheets. Kunci {e} tidak ditemukan.")
-        return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
+        # Susun teks promo
+        promo_text = "DATA PROMO AKTIF:\n"
+        for row in data[1:]:
+            if len(row) >= 6 and row[0].upper() == "AKTIF":
+                promo_text += (
+                    f"- Nama: {row[1]}, Periode: {row[2]}, "
+                    f"Syarat: {row[3]}, Diskon: {row[4]}, Provider: {row[5]}\n"
+                )
+
+        return promo_text or "Tidak ada promo aktif."
 
     except Exception as e:
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
-        
 
-# --- BAGIAN 2: APLIKASI WEB STREAMLIT UTAMA ---
 
-# 1. Dapatkan data terbaru
-promo_terbaru = get_promo_data_from_sheet() 
+# --- BAGIAN 2: APLIKASI WEB STREAMLIT ---
 
-# 2. Instruksi Penuh
+promo_terbaru = get_promo_data_from_sheet()
+
 instruksi_penuh = (
-    "Anda adalah Asisten Promo AZKO. Tugasmu menjawab HANYA berdasarkan data promo yang diberikan.\n\n" + 
-    promo_terbaru + 
-    "\n\nATURAN RESPON: Selalu gunakan bahasa sopan, singkat dan jelas. " + 
-    "JANGAN jawab di luar topik promo. Jika di luar topik, balas 'Maaf, saya hanya bisa memberikan informasi promo saat ini.'"
+    "Anda adalah Asisten Promo AZKO. Jawab HANYA berdasarkan data promo berikut:\n\n"
+    + promo_terbaru
+    + "\n\nAturan respon: Gunakan bahasa sopan, singkat, dan jelas. "
+      "Jika pertanyaan di luar promo, balas: "
+      "'Maaf, saya hanya bisa memberikan informasi promo saat ini.'"
 )
 
 try:
-    # 3. Buat model (menggunakan model/gemini-flash-latest)
+    # Buat model Gemini
     model = genai.GenerativeModel(
-        model_name='models/gemini-flash-latest', 
+        model_name="models/gemini-flash-latest",
         system_instruction=instruksi_penuh
     )
 
     st.title("🤖 Asisten Promo Kasir AZKO")
     st.caption("Didukung oleh Gemini AI & Google Sheets")
 
-    # 4. Siapkan "memori" chat
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat(history=[])
 
@@ -86,20 +74,17 @@ try:
         with st.chat_message(role):
             st.markdown(message.parts[0].text)
 
-    # 5. Kotak input teks
-    pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
+    # Input pertanyaan
+    pertanyaan = st.chat_input("Ketik pertanyaan Anda di sini...")
 
-    if pertanyaan_kasir:
-        # Tampilkan pesan user
+    if pertanyaan:
         with st.chat_message("user"):
-            st.markdown(pertanyaan_kasir)
+            st.markdown(pertanyaan)
 
-        # Kirim pesan ke Gemini
-        response = st.session_state.chat.send_message(pertanyaan_kasir)
+        response = st.session_state.chat.send_message(pertanyaan)
 
-        # Tampilkan respons bot
         with st.chat_message("assistant"):
             st.markdown(response.text)
 
 except Exception as e:
-    st.error(f"❌ Error AI: Terjadi kesalahan saat mengirim pesan ke Gemini. Error: {e}")
+    st.error(f"❌ Error AI: {e}")
