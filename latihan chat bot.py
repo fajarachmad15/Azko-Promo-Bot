@@ -20,13 +20,33 @@ def get_promo_data_from_sheet():
         # 1. Ambil dictionary Read-Only dari Streamlit
         original_secrets = st.secrets["gcp_service_account"]
 
-        # 2. 🛠️ PERBAIKAN: Gunakan dict() untuk membuat salinan (copy)
-        #    Ini menggantikan .copy() yang menyebabkan error
+        # 2. Buat SALINAN (copy) yang bisa dimodifikasi
         secrets_dict_copy = dict(original_secrets)
 
-        # 3. Modifikasi SALINAN (bukan aslinya)
+        # 3. 🛠️ PERBAIKAN FINAL: Memformat ulang Private Key
         if "private_key" in secrets_dict_copy:
-            secrets_dict_copy["private_key"] = secrets_dict_copy["private_key"].replace('\\n', '\n')
+            # Ambil kunci mentah dari TOML (yang mungkin memiliki \n ganda)
+            raw_key = secrets_dict_copy["private_key"]
+            
+            # Bersihkan \n ganda menjadi \n tunggal
+            key_with_newlines = raw_key.replace('\\n', '\n')
+            
+            # Pisahkan berdasarkan \n
+            key_parts = key_with_newlines.split('\n')
+            
+            # Ambil header, footer, dan gabungkan semua bagian tengah
+            header = key_parts[0]  # -----BEGIN PRIVATE KEY-----
+            footer = key_parts[-1] # -----END PRIVATE KEY-----
+            
+            # Gabungkan semua baris di tengah TANPA \n
+            middle_block = "".join(key_parts[1:-1]) 
+            
+            # Gabungkan kembali dalam format PEM yang 100% benar
+            final_key = header + "\n" + middle_block + "\n" + footer
+            
+            # Masukkan kunci yang sudah bersih ke salinan dictionary
+            secrets_dict_copy["private_key"] = final_key
+            
         else:
             st.error("❌ Gagal memuat data: 'private_key' tidak ditemukan di Streamlit Secrets.")
             return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
