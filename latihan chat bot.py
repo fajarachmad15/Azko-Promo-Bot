@@ -18,16 +18,15 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PERBAIKAN FINAL: Membaca kunci 'as-is' (apa adanya)
+        # PERBAIKAN: Membaca kunci 'single-line' dan memperbaikinya
         # ----------------------------------------------------
-        # Kunci TOML multiline (""") sudah memberikan format yang benar.
-        # Kita tidak perlu .replace('\\n', '\n') lagi.
         
         secrets_dict_copy = {
             "type": st.secrets["GCP_TYPE"],
             "project_id": st.secrets["GCP_PROJECT_ID"],
             "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
-            "private_key": st.secrets["GCP_PRIVATE_KEY"], # <--- INI PERBAIKANNYA
+            # INI PERBAIKANNYA: Mengembalikan .replace()
+            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace('\\n', '\n'), 
             "client_email": st.secrets["GCP_CLIENT_EMAIL"],
             "client_id": st.secrets["GCP_CLIENT_ID"],
             "auth_uri": st.secrets["GCP_AUTH_URI"],
