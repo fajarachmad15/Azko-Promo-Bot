@@ -20,8 +20,9 @@ def get_promo_data_from_sheet():
         # 1. Ambil dictionary Read-Only dari Streamlit
         original_secrets = st.secrets["gcp_service_account"]
 
-        # 2. 🛠️ PERBAIKAN: Buat SALINAN (copy) agar bisa dimodifikasi
-        secrets_dict_copy = original_secrets.copy()
+        # 2. 🛠️ PERBAIKAN: Gunakan dict() untuk membuat salinan (copy)
+        #    Ini menggantikan .copy() yang menyebabkan error
+        secrets_dict_copy = dict(original_secrets)
 
         # 3. Modifikasi SALINAN (bukan aslinya)
         if "private_key" in secrets_dict_copy:
