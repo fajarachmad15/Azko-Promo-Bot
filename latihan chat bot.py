@@ -18,7 +18,7 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PEROMBAKAN FINAL: Membaca kunci 'as-is' (apa adanya)
+        # PERBAIKAN FINAL: Membaca kunci 'as-is' (apa adanya)
         # ----------------------------------------------------
         # Kunci TOML multiline (""") sudah memberikan format yang benar.
         # Kita tidak perlu .replace('\\n', '\n') lagi.
@@ -64,7 +64,7 @@ def get_promo_data_from_sheet():
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Ini akan menangkap error 'InvalidPadding' jika masih ada
+        # Ini akan menangkap error 'Incorrect padding' jika masih ada
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
