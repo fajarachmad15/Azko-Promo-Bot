@@ -1,7 +1,6 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
-# Kita tidak butuh 'import json' lagi
 
 # --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
@@ -18,16 +17,18 @@ def get_promo_data_from_sheet():
     """Mengambil data promo dari Google Sheets menggunakan Service Account."""
     
     try:
-        # ----------------------------------------------------
-        # PERBAIKAN BARU: Membaca TOML dictionary secara langsung
-        # ----------------------------------------------------
-        # Streamlit secara otomatis mengubah secret 'gcp_service_account.*' 
-        # menjadi sebuah dictionary (kamus) di Python.
-        
-        # Ambil dictionary-nya
+        # 1. Ambil dictionary dari Streamlit
         secrets_dict = st.secrets["gcp_service_account"]
 
-        # Buat Service Account client langsung dari dictionary
+        # 2. PERBAIKAN PENTING: 
+        #    Membersihkan 'private_key' dari karakter \n ganda
+        if "private_key" in secrets_dict:
+            secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
+        else:
+            st.error("❌ Gagal memuat data: 'private_key' tidak ditemukan di Streamlit Secrets.")
+            return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
+
+        # 3. Buat Service Account client
         gc = gspread.service_account_from_dict(secrets_dict)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
@@ -37,7 +38,6 @@ def get_promo_data_from_sheet():
         worksheet = sh.sheet1
         data = worksheet.get_all_values()
         
-        # Kumpulkan data menjadi teks yang rapi untuk prompt AI
         promo_text = "DATA PROMO AKTIF:\n"
         
         for row in data[1:]: 
@@ -51,23 +51,21 @@ def get_promo_data_from_sheet():
 
     except KeyError:
         st.error(
-            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' (atau salah satu sub-kuncinya) tidak ditemukan. "
-            "Pastikan Anda telah menambahkan semua 12 secret di Streamlit Cloud."
+            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan. "
+            "Pastikan semua 11 secret 'gcp_service_account.*' sudah benar di Streamlit Cloud."
         )
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Menangkap error umum
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
 
 # --- BAGIAN 2: APLIKASI WEB STREAMLIT UTAMA ---
+# (Bagian ini tidak berubah)
 
-# 1. Dapatkan data terbaru dari Sheets
 promo_terbaru = get_promo_data_from_sheet() 
 
-# 2. Gabungkan instruksi tetap dengan data terbaru dari Sheets
 instruksi_penuh = (
     "Anda adalah Asisten Promo AZKO. Tugasmu menjawab HANYA berdasarkan data promo yang diberikan.\n\n" + 
     promo_terbaru + 
@@ -77,7 +75,6 @@ instruksi_penuh = (
 )
 
 try:
-    # 3. Buat modelnya
     model = genai.GenerativeModel(
         model_name='gemini-2.5-flash', 
         system_instruction=instruksi_penuh
@@ -86,17 +83,14 @@ try:
     st.title("🤖 Asisten Promo Kasir AZKO")
     st.caption("Didukung oleh Gemini AI & Google Sheets")
 
-    # 4. Siapkan "memori" (session_state chat)
     if "chat" not in st.session_state:
         st.session_state.chat = model.start_chat(history=[])
 
-    # Tampilkan riwayat chat
     for message in st.session_state.chat.history:
         role = "user" if message.role == "user" else "assistant"
         with st.chat_message(role):
             st.markdown(message.parts[0].text)
 
-    # 5. Kotak input teks
     pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
 
     if pertanyaan_kasir:
