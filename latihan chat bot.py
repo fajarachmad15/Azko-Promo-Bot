@@ -18,15 +18,25 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PERBAIKAN: Membaca kunci 'single-line' dan memperbaikinya
+        # PERBAIKAN ANTI-GAGAL: Membangun Kunci PEM secara manual
         # ----------------------------------------------------
         
+        # 1. Tentukan Header dan Footer Kunci
+        PEM_HEADER = "-----BEGIN PRIVATE KEY-----"
+        PEM_FOOTER = "-----END PRIVATE KEY-----"
+        
+        # 2. Ambil data inti kunci (satu baris panjang) dari secret BARU
+        key_data = st.secrets["GCP_PRIVATE_KEY_DATA"]
+        
+        # 3. Gabungkan menjadi format PEM yang sempurna
+        full_key = PEM_HEADER + "\n" + key_data + "\n" + PEM_FOOTER
+        
+        # 4. Bangun dictionary kita
         secrets_dict_copy = {
             "type": st.secrets["GCP_TYPE"],
             "project_id": st.secrets["GCP_PROJECT_ID"],
             "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
-            # INI PERBAIKANNYA: Mengembalikan .replace()
-            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace('\\n', '\n'), 
+            "private_key": full_key, # <--- Menggunakan kunci yang baru kita bangun
             "client_email": st.secrets["GCP_CLIENT_EMAIL"],
             "client_id": st.secrets["GCP_CLIENT_ID"],
             "auth_uri": st.secrets["GCP_AUTH_URI"],
@@ -36,10 +46,9 @@ def get_promo_data_from_sheet():
             "universe_domain": st.secrets["GCP_UNIVERSE_DOMAIN"]
         }
 
-        # 3. Gunakan dictionary yang sudah bersih untuk otentikasi
+        # 5. Gunakan dictionary untuk otentikasi
         gc = gspread.service_account_from_dict(secrets_dict_copy)
         
-        # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
         sh = gc.open_by_url(SHEET_URL)
         
@@ -59,11 +68,10 @@ def get_promo_data_from_sheet():
 
     except KeyError as e:
         st.error(f"❌ Gagal memuat data Sheets. Secret '{e.args[0]}' tidak ditemukan. "
-                 "Pastikan semua 12 secret (GCP_TYPE, GCP_PROJECT_ID, dll) sudah benar.")
+                 "Pastikan semua secret (GCP_TYPE, GCP_PROJECT_ID, dll) sudah benar.")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Ini akan menangkap error 'Incorrect padding' jika masih ada
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
