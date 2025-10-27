@@ -18,7 +18,7 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PERBAIKAN ANTI-GAGAL: Membangun Kunci PEM secara manual
+        # PERBAIKAN: Membangun Kunci PEM secara manual dari DATA
         # ----------------------------------------------------
         
         # 1. Tentukan Header dan Footer Kunci
@@ -26,7 +26,7 @@ def get_promo_data_from_sheet():
         PEM_FOOTER = "-----END PRIVATE KEY-----"
         
         # 2. Ambil data inti kunci (satu baris panjang) dari secret BARU
-        key_data = st.secrets["GCP_PRIVATE_KEY_DATA"]
+        key_data = st.secrets["GCP_PRIVATE_KEY_DATA"] # <--- Kembali menggunakan _DATA
         
         # 3. Gabungkan menjadi format PEM yang sempurna
         full_key = PEM_HEADER + "\n" + key_data + "\n" + PEM_FOOTER
@@ -67,8 +67,9 @@ def get_promo_data_from_sheet():
         return promo_text
 
     except KeyError as e:
+        # Ini akan menangkap jika salah satu kunci GCP_* hilang
         st.error(f"❌ Gagal memuat data Sheets. Secret '{e.args[0]}' tidak ditemukan. "
-                 "Pastikan semua secret (GCP_TYPE, GCP_PROJECT_ID, dll) sudah benar.")
+                 "Pastikan semua secret (GCP_TYPE, GCP_PROJECT_ID, dll termasuk GCP_PRIVATE_KEY_DATA) sudah benar.")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
