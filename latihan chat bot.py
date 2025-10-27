@@ -18,16 +18,16 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PEROMBAKAN TOTAL: Membangun dictionary secara manual
+        # PEROMBAKAN FINAL: Membaca kunci 'as-is' (apa adanya)
         # ----------------------------------------------------
-        # Kita tidak lagi membaca 'st.secrets["gcp_service_account"]'
-        # Kita membangun dictionary kita sendiri dari 11 secret datar (flat)
+        # Kunci TOML multiline (""") sudah memberikan format yang benar.
+        # Kita tidak perlu .replace('\\n', '\n') lagi.
         
         secrets_dict_copy = {
             "type": st.secrets["GCP_TYPE"],
             "project_id": st.secrets["GCP_PROJECT_ID"],
             "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
-            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace('\\n', '\n'), # Membersihkan kunci
+            "private_key": st.secrets["GCP_PRIVATE_KEY"], # <--- INI PERBAIKANNYA
             "client_email": st.secrets["GCP_CLIENT_EMAIL"],
             "client_id": st.secrets["GCP_CLIENT_ID"],
             "auth_uri": st.secrets["GCP_AUTH_URI"],
@@ -37,7 +37,7 @@ def get_promo_data_from_sheet():
             "universe_domain": st.secrets["GCP_UNIVERSE_DOMAIN"]
         }
 
-        # 3. Gunakan SALINAN yang sudah bersih untuk otentikasi
+        # 3. Gunakan dictionary yang sudah bersih untuk otentikasi
         gc = gspread.service_account_from_dict(secrets_dict_copy)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
@@ -59,12 +59,12 @@ def get_promo_data_from_sheet():
         return promo_text
 
     except KeyError as e:
-        # Error ini akan memberi tahu kita kunci datar mana yang hilang
         st.error(f"❌ Gagal memuat data Sheets. Secret '{e.args[0]}' tidak ditemukan. "
                  "Pastikan semua 12 secret (GCP_TYPE, GCP_PROJECT_ID, dll) sudah benar.")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
+        # Ini akan menangkap error 'InvalidPadding' jika masih ada
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
