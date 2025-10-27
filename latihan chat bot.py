@@ -1,37 +1,33 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
-import json # Diperlukan untuk memproses string JSON dari secrets
+# Kita tidak butuh 'import json' lagi
 
 # --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
 # 1. Konfigurasi Model Gemini
 try:
-    # Mengambil Kunci API dari secrets
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except KeyError:
-    st.error("❌ ERROR: Kunci 'GEMINI_API_KEY' tidak ditemukan. Mohon periksa file .streamlit/secrets.toml Anda.")
-    st.stop() # Hentikan aplikasi jika API Key tidak ada
-
+    st.error("❌ ERROR: Kunci 'GEMINI_API_KEY' tidak ditemukan. Mohon periksa Streamlit Cloud Secrets Anda.")
+    st.stop() 
 
 # 2. Fungsi untuk mendapatkan data dari Google Sheets
-@st.cache_data(ttl=600) # Data akan di-cache selama 10 menit
+@st.cache_data(ttl=600)
 def get_promo_data_from_sheet():
     """Mengambil data promo dari Google Sheets menggunakan Service Account."""
     
     try:
-        # 1. Ambil string JSON Service Account dari st.secrets
-        sa_json_string = st.secrets["gcp_service_account"]
+        # ----------------------------------------------------
+        # PERBAIKAN BARU: Membaca TOML dictionary secara langsung
+        # ----------------------------------------------------
+        # Streamlit secara otomatis mengubah secret 'gcp_service_account.*' 
+        # menjadi sebuah dictionary (kamus) di Python.
         
-        # 2. Ubah string JSON menjadi dictionary Python
-        secrets_dict = json.loads(sa_json_string)
+        # Ambil dictionary-nya
+        secrets_dict = st.secrets["gcp_service_account"]
 
-        # 3. PERBAIKAN PENTING: Membersihkan private_key dari \n ganda
-        # Ini mengatasi masalah format kunci privat saat parsing JSON
-        if "private_key" in secrets_dict:
-            secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
-
-        # 4. Buat Service Account client
+        # Buat Service Account client langsung dari dictionary
         gc = gspread.service_account_from_dict(secrets_dict)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
@@ -44,9 +40,7 @@ def get_promo_data_from_sheet():
         # Kumpulkan data menjadi teks yang rapi untuk prompt AI
         promo_text = "DATA PROMO AKTIF:\n"
         
-        # Memproses data (mengabaikan header [0] dan promo NONAKTIF)
         for row in data[1:]: 
-            # Pastikan baris memiliki 6 kolom dan statusnya AKTIF (Kolom A)
             if len(row) >= 6 and row[0].upper() == 'AKTIF':
                 promo_text += (
                     f"- Nama: {row[1]}, Periode: {row[2]}, Syarat: {row[3]}, "
@@ -57,13 +51,13 @@ def get_promo_data_from_sheet():
 
     except KeyError:
         st.error(
-            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' tidak ditemukan. "
-            "Pastikan secrets.toml sudah diatur dengan benar."
+            "❌ Gagal memuat data Sheets. Kunci 'gcp_service_account' (atau salah satu sub-kuncinya) tidak ditemukan. "
+            "Pastikan Anda telah menambahkan semua 12 secret di Streamlit Cloud."
         )
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Menangkap error umum (termasuk error parsing JSON 'Invalid control character')
+        # Menangkap error umum
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
@@ -83,7 +77,7 @@ instruksi_penuh = (
 )
 
 try:
-    # 3. Buat modelnya DENGAN instruksi gabungan
+    # 3. Buat modelnya
     model = genai.GenerativeModel(
         model_name='gemini-2.5-flash', 
         system_instruction=instruksi_penuh
@@ -106,14 +100,11 @@ try:
     pertanyaan_kasir = st.chat_input("Ketik pertanyaan Anda di sini...")
 
     if pertanyaan_kasir:
-        # Tampilkan pesan user
         with st.chat_message("user"):
             st.markdown(pertanyaan_kasir)
 
-        # Kirim pesan ke Gemini dan dapatkan respons
         response = st.session_state.chat.send_message(pertanyaan_kasir)
 
-        # Tampilkan respons bot
         with st.chat_message("assistant"):
             st.markdown(response.text)
 
