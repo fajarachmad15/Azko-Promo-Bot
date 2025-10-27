@@ -3,3 +3,4 @@ google-generativeai
 gspread
 pycryptodome
 rsa
+pyasn1-modules
