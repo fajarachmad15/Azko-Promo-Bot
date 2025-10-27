@@ -4,3 +4,4 @@ gspread
 pycryptodome
 rsa
 pyasn1-modules
+cryptography
