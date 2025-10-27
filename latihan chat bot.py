@@ -1,8 +1,9 @@
 import google.generativeai as genai
 import streamlit as st
 import gspread
+import base64 # Import library base64
 
-# --- BAGIAN 1: KONFIGURASI DAN FUNSI DATA ---
+# --- BAGIAN 1: KONFIGURASI DAN FUNGSI DATA ---
 
 # 1. Konfigurasi Model Gemini
 try:
@@ -18,15 +19,30 @@ def get_promo_data_from_sheet():
     
     try:
         # ----------------------------------------------------
-        # PERBAIKAN: Membaca kunci multiline (""") dan membersihkannya
+        # PERBAIKAN ANTI-GAGAL: Membangun Kunci PEM dari Base64 di Kode
         # ----------------------------------------------------
         
-        secrets_dict_copy = {
+        # 1. Simpan data inti kunci (Base64 satu baris) LANGSUNG di kode
+        #    GANTI TEKS DI BAWAH INI DENGAN DATA BASE64 ANDA DARI LANGKAH 1
+        private_key_base64_data = "SATU_BARIS_BASE64_PANJANG_DARI_LANGKAH_1" 
+                                   
+        # 2. Tentukan Header dan Footer Kunci
+        PEM_HEADER = "-----BEGIN PRIVATE KEY-----"
+        PEM_FOOTER = "-----END PRIVATE KEY-----"
+        
+        # 3. Decode Base64 (ini akan error jika data base64 salah)
+        #    Kita tidak perlu decode, library cryptography bisa handle base64 langsung
+        #    Kita hanya perlu memastikan formatnya benar
+        
+        # 4. Gabungkan menjadi format PEM yang sempurna
+        full_key = PEM_HEADER + "\n" + private_key_base64_data + "\n" + PEM_FOOTER
+
+        # 5. Bangun dictionary kita (mengambil 10 secret lain + kunci yang baru dibangun)
+        secrets_dict_built = {
             "type": st.secrets["GCP_TYPE"],
             "project_id": st.secrets["GCP_PROJECT_ID"],
             "private_key_id": st.secrets["GCP_PRIVATE_KEY_ID"],
-            # INI PERBAIKANNYA: Mengembalikan .replace() untuk kunci multiline
-            "private_key": st.secrets["GCP_PRIVATE_KEY"].replace('\\n', '\n'), 
+            "private_key": full_key, # <--- Menggunakan kunci yang baru kita bangun
             "client_email": st.secrets["GCP_CLIENT_EMAIL"],
             "client_id": st.secrets["GCP_CLIENT_ID"],
             "auth_uri": st.secrets["GCP_AUTH_URI"],
@@ -36,10 +52,9 @@ def get_promo_data_from_sheet():
             "universe_domain": st.secrets["GCP_UNIVERSE_DOMAIN"]
         }
 
-        # 3. Gunakan dictionary yang sudah bersih untuk otentikasi
-        gc = gspread.service_account_from_dict(secrets_dict_copy)
+        # 6. Gunakan dictionary untuk otentikasi
+        gc = gspread.service_account_from_dict(secrets_dict_built)
         
-        # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
         sh = gc.open_by_url(SHEET_URL)
         
@@ -59,7 +74,12 @@ def get_promo_data_from_sheet():
 
     except KeyError as e:
         st.error(f"❌ Gagal memuat data Sheets. Secret '{e.args[0]}' tidak ditemukan. "
-                 "Pastikan semua 12 secret (GCP_TYPE, GCP_PROJECT_ID, dll) sudah benar.")
+                 "Pastikan semua 11 secret (GCP_TYPE, GCP_PROJECT_ID, dll KECUALI GCP_PRIVATE_KEY) sudah benar.")
+        return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
+    
+    except base64.binascii.Error as e:
+        st.error(f"❌ Gagal memuat data Sheets. Data Base64 Kunci Privat SALAH: {e}. "
+                 "Pastikan Anda menyalin data Base64 dengan benar dari file JSON dan menghapus semua '\\n'.")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
