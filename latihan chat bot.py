@@ -17,19 +17,21 @@ def get_promo_data_from_sheet():
     """Mengambil data promo dari Google Sheets menggunakan Service Account."""
     
     try:
-        # 1. Ambil dictionary dari Streamlit
-        secrets_dict = st.secrets["gcp_service_account"]
+        # 1. Ambil dictionary Read-Only dari Streamlit
+        original_secrets = st.secrets["gcp_service_account"]
 
-        # 2. PERBAIKAN PENTING: 
-        #    Membersihkan 'private_key' dari karakter \n ganda
-        if "private_key" in secrets_dict:
-            secrets_dict["private_key"] = secrets_dict["private_key"].replace('\\n', '\n')
+        # 2. 🛠️ PERBAIKAN: Buat SALINAN (copy) agar bisa dimodifikasi
+        secrets_dict_copy = original_secrets.copy()
+
+        # 3. Modifikasi SALINAN (bukan aslinya)
+        if "private_key" in secrets_dict_copy:
+            secrets_dict_copy["private_key"] = secrets_dict_copy["private_key"].replace('\\n', '\n')
         else:
             st.error("❌ Gagal memuat data: 'private_key' tidak ditemukan di Streamlit Secrets.")
             return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
-        # 3. Buat Service Account client
-        gc = gspread.service_account_from_dict(secrets_dict)
+        # 4. Gunakan SALINAN yang sudah bersih untuk otentikasi
+        gc = gspread.service_account_from_dict(secrets_dict_copy)
         
         # GANTI DENGAN URL GOOGLE SHEET PROMO ANDA DI SINI
         SHEET_URL = "https://docs.google.com/spreadsheets/d/1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4/edit?usp=sharing"
