@@ -1,71 +1,133 @@
+import re
+import os
 import streamlit as st
 import gspread
 import pandas as pd
 import google.generativeai as genai
+import random
 
-# --- KUNCI API ---
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+# Ambil API key dengan fallback (tidak memicu KeyError)
+API_KEY = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+if not API_KEY:
+    st.error("API key Gemini tidak ditemukan. Tambahkan secret 'GEMINI_API_KEY' (atau 'GOOGLE_API_KEY') di Streamlit Secrets, lalu Reboot App.")
+    st.stop()
 
-# --- KONEKSI GOOGLE SHEETS ---
-gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-sheet = gc.open("promo").sheet1
+genai.configure(api_key=API_KEY)
+
+# Koneksi Google Sheets (service account harus ada di secrets)
+if "gcp_service_account" not in st.secrets:
+    st.error("Service account Google Sheets tidak ditemukan di Streamlit Secrets sebagai 'gcp_service_account'.")
+    st.stop()
+
+gcp = dict(st.secrets["gcp_service_account"])
+gc = gspread.service_account_from_dict(gcp)
+
+SHEET_KEY = st.secrets.get("SHEET_KEY") or st.secrets.get("SHEET_ID")
+if not SHEET_KEY:
+    st.error("SHEET_KEY / SHEET_ID tidak ditemukan di Streamlit Secrets. Tambahkan key 'SHEET_KEY' dengan ID spreadsheet.")
+    st.stop()
+
+sheet = gc.open_by_key(SHEET_KEY).worksheet("promo")
 df = pd.DataFrame(sheet.get_all_records())
 
-# --- SETUP HALAMAN ---
-st.set_page_config(page_title="AZKO Promo Chatbot", layout="centered")
-st.title("💬 Asisten Promo AZKO")
+st.set_page_config(page_title="AZKO Promo Chatbot", page_icon="🤖", layout="centered")
+st.title("🤖 AZKO – Asisten Promo Bank")
 
-# --- SIMPAN RIWAYAT CHAT ---
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hai! Aku AZKO, asisten promo. Mau cari promo apa hari ini?"}
+    ]
+    st.session_state.context = ""
 
-# --- FUNGSI RESPON BOT ---
-def get_bot_response(user_input, df):
-    user_input_lower = user_input.lower()
+def random_comment():
+    choices = [
+        "Hehe, promo ini lumayan menarik nih.",
+        "Wah, cocok banget buat yang suka hemat.",
+        "Waduh, sayang aku cuma bot, gak bisa ikutan belanja 😅"
+    ]
+    return random.choice(choices)
 
-    # Deteksi sapaan
-    greetings = ["hai", "halo", "hi", "selamat pagi", "selamat siang", "selamat sore", "selamat malam"]
-    if any(g in user_input_lower for g in greetings):
-        return "Halo! Saya AZKO, asisten promo kamu 😊 Ada yang bisa saya bantu seputar promo bank hari ini?"
+def detect_intent(text: str) -> str:
+    text = text.lower().strip()
+    if re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text): return "greeting"
+    if re.search(r"\b(apa kabar|gimana kabar|lagi ngapain)\b", text): return "smalltalk"
+    if re.search(r"\b(terima kasih|makasih|thanks)\b", text): return "thanks"
+    if re.search(r"\b(dah|bye|sampai jumpa)\b", text): return "goodbye"
+    if re.search(r"\b(maaf|salah|error|gagal)\b", text): return "apology"
+    return "promo"
 
-    # Cek apakah ada konteks percakapan sebelumnya
-    last_context = None
-    if st.session_state.history:
-        for msg in reversed(st.session_state.history):
-            if "promo" in msg["content"].lower():
-                last_context = msg["content"].lower()
-                break
+def find_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
+    q = query.lower().strip()
+    if not q: return df.iloc[0:0]
+    mask = pd.Series([False] * len(df))
+    for c in df.columns:
+        mask |= df[c].astype(str).str.lower().str.contains(q, na=False)
+    return df[mask]
 
-    # Coba cari di data
-    for i, row in df.iterrows():
-        nama_promo = str(row["NAMA_PROMO"]).lower()
-        if nama_promo in user_input_lower or (last_context and nama_promo in last_context):
-            if str(row["PROMO_STATUS"]).lower() == "aktif":
-                return (
-                    f"✨ Promo **{row['NAMA_PROMO']}** masih *aktif!* 🎉\n\n"
-                    f"📅 **Periode:** {row['PERIODE']}\n"
-                    f"📋 **Syarat utama:** {row['SYARAT_UTAMA']}\n"
-                    f"💰 **Detail diskon:** {row['DETAIL_DISKON']}\n"
-                    f"🏦 **Bank/Provider:** {row['BANK_PROVIDER']}"
-                )
-            else:
-                return f"Promo **{row['NAMA_PROMO']}** sudah tidak aktif ya. Mau saya bantu carikan promo lain dari {row['BANK_PROVIDER']}?"
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-    # Kalau tidak ditemukan di sheet
-    return "Hmm... untuk promo itu saya belum punya konfirmasinya 😅. Kamu bisa hubungi finance rep area kamu ya biar info-nya lebih pasti."
+if prompt := st.chat_input("Ketik pesanmu di sini..."):
+    st.chat_message("user").markdown(prompt)
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-# --- TAMPILAN CHAT BUBBLE ---
-for chat in st.session_state.history:
-    if chat["role"] == "user":
-        st.markdown(f"<div style='text-align: right; background-color: #DCF8C6; padding:10px; border-radius: 12px; margin:4px 0;'>{chat['content']}</div>", unsafe_allow_html=True)
+    intent = detect_intent(prompt)
+    answer = ""
+
+    if intent == "greeting":
+        lower = prompt.lower()
+        if "pagi" in lower: greet = "Selamat pagi 🌞"
+        elif "siang" in lower: greet = "Selamat siang ☀️"
+        elif "sore" in lower: greet = "Selamat sore 🌇"
+        elif "malam" in lower: greet = "Selamat malam 🌙"
+        else: greet = "Halo 👋"
+        answer = f"{greet}! Saya AZKO — asisten promo yang siap bantu. Mau cari promo apa hari ini?"
+
+    elif intent == "smalltalk":
+        answer = "Saya baik, terima kasih! Siap bantu cari promo keren buat kamu 😄"
+
+    elif intent == "thanks":
+        answer = "Sama-sama 🙏 Kalau mau cek promo lain tinggal ketik saja."
+
+    elif intent == "goodbye":
+        answer = "Sampai jumpa! Semoga harimu menyenangkan 👋"
+
+    elif intent == "apology":
+        answer = "Gak apa-apa — lanjut aja, mau cari promo apa?"
+
     else:
-        st.markdown(f"<div style='text-align: left; background-color: #F1F0F0; padding:10px; border-radius: 12px; margin:4px 0;'>{chat['content']}</div>", unsafe_allow_html=True)
+        # gunakan konteks singkat
+        context_prompt = st.session_state.context + f"User: {prompt}\n"
+        matches = find_matches(df, prompt)
+        if matches.empty:
+            instr = (
+                "Kamu adalah AZKO, asisten promo bank yang pintar dan santai. "
+                "Jika user menanyakan promo yang tidak ada di data, jawab sopan, singkat, dan sarankan langkah berikutnya."
+            )
+            try:
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                resp = model.generate_content(instr + "\n\n" + context_prompt + "\nUser: " + prompt)
+                answer = getattr(resp, "text", "Maaf, saya belum punya konfirmasi untuk promo itu. Coba hubungi finance rep area.")
+            except Exception:
+                answer = "Maaf, saya belum punya konfirmasi untuk promo itu. Coba hubungi finance rep area."
+        else:
+            promos = []
+            for _, r in matches.iterrows():
+                promos.append(
+                    f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n  📅 {r.get('PERIODE','')}\n  📝 {r.get('SYARAT_UTAMA','')}\n  💰 {r.get('DETAIL_DISKON','')}"
+                )
+            hasil = "\n\n".join(promos)
+            try:
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                instr = "Jelaskan ringkas dan ramah berdasarkan data promo berikut:"
+                resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
+                answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
+            except Exception:
+                answer = hasil + "\n\n" + random_comment()
 
-# --- INPUT USER ---
-user_input = st.chat_input("Ketik pesan kamu di sini...")
+    with st.chat_message("assistant"):
+        st.markdown(answer)
 
-if user_input:
-    st.session_state.history.append({"role": "user", "content": user_input})
-    response = get_bot_response(user_input, df)
-    st.session_state.history.append({"role": "bot", "content": response})
-    st.rerun()
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.context += f"User: {prompt}\nAZKO: {answer}\n"
