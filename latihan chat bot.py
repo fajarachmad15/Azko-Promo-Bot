@@ -7,7 +7,6 @@ import base64 # Import library base64
 
 # 1. Konfigurasi Model Gemini
 try:
-    # Ganti nilai di bawah ini jika kunci API Anda berbeda
     # Pastikan secret GEMINI_API_KEY ada di Streamlit Cloud
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 except KeyError:
@@ -33,7 +32,6 @@ def get_promo_data_from_sheet():
         PEM_FOOTER = "-----END PRIVATE KEY-----"
         
         # 3. Gabungkan menjadi format PEM yang sempurna
-        #    Library cryptography bisa membaca Base64 langsung jika formatnya benar
         full_key = PEM_HEADER + "\n" + private_key_base64_data + "\n" + PEM_FOOTER
 
         # 4. Bangun dictionary kita (mengambil 10 secret lain + kunci yang baru dibangun)
@@ -82,7 +80,7 @@ def get_promo_data_from_sheet():
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
 
     except Exception as e:
-        # Error InvalidPadding atau InvalidByte akan muncul di sini jika masih salah
+        # Error InvalidPadding akan muncul di sini jika masih salah
         st.error(f"❌ Gagal memuat data Sheets. Memuat instruksi cadangan. Error: {e}")
         return "DATA TIDAK DITEMUKAN. Sampaikan ke kasir untuk cek manual."
         
