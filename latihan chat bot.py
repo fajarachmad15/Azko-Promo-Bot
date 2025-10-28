@@ -1,12 +1,20 @@
+# app.py
+import os
 import streamlit as st
 import gspread
 import google.generativeai as genai
 import pandas as pd
 
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+API_KEY = st.secrets.get("GOOGLE_API_KEY") or st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if not API_KEY:
+    st.error("Tambahkan GEMINI/GOOGLE API key di Streamlit Secrets dengan key 'GEMINI_API_KEY' atau 'GOOGLE_API_KEY'.")
+    st.stop()
 
-gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-sheet = gc.open_by_key("1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4").worksheet("promo")
+genai.configure(api_key=API_KEY)
+
+gcp = dict(st.secrets["gcp_service_account"])
+gc = gspread.service_account_from_dict(gcp)
+sheet = gc.open_by_key(st.secrets["SHEET_KEY"]).worksheet("promo")
 data = sheet.get_all_records()
 df = pd.DataFrame(data)
 
@@ -17,6 +25,6 @@ user_input = st.text_input("Ketik pertanyaan kamu:")
 
 if user_input:
     context = "Berikut data promo yang tersedia:\n" + df.to_string(index=False)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
     response = model.generate_content([context, user_input])
-    st.markdown("**Chatbot:** " + response.text)
+    st.markdown("**Chatbot:** " + getattr(response, "text", str(response)))
