@@ -1,7 +1,5 @@
 streamlit
 google-generativeai
 gspread
-pycryptodome
-rsa
-pyasn1-modules
-cryptography
+pandas
+google-auth
