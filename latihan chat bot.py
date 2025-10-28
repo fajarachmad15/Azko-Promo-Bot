@@ -3,7 +3,7 @@ import gspread
 import google.generativeai as genai
 import pandas as pd
 
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
 sheet = gc.open("promo").sheet1
