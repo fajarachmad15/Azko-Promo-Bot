@@ -3,10 +3,10 @@ import gspread
 import google.generativeai as genai
 import pandas as pd
 
-genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
 gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-sheet = gc.open("promo").sheet1
+sheet = gc.open_by_key("1Pxc3NK83INFoLxJGfoGQ3bnDVlj5BzV5Fq5r_rHNXp4").worksheet("promo")
 data = sheet.get_all_records()
 df = pd.DataFrame(data)
 
