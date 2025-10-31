@@ -6,6 +6,7 @@ import pandas as pd
 import google.generativeai as genai
 import random
 
+# =============== KONFIGURASI API DAN GOOGLE SHEETS ===============
 API_KEY = st.secrets.get("GEMINI_API_KEY") or st.secrets.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     st.error("API key Gemini tidak ditemukan. Tambahkan secret 'GEMINI_API_KEY' di Streamlit Secrets, lalu Reboot App.")
@@ -28,6 +29,7 @@ if not SHEET_KEY:
 sheet = gc.open_by_key(SHEET_KEY).worksheet("promo")
 df = pd.DataFrame(sheet.get_all_records())
 
+# =============== KONFIGURASI HALAMAN ===============
 st.set_page_config(page_title="Kozy - Asisten Promo AZKO", page_icon="🛍️", layout="centered")
 st.title("🛍️ Kozy – Asisten Promo AZKO")
 
@@ -37,11 +39,12 @@ if "messages" not in st.session_state:
     ]
     st.session_state.context = ""
 
+# =============== FUNGSI PENDUKUNG ===============
 def random_comment():
     return random.choice([
         "Hehe, lumayan banget promonya 😄",
-        "Cocok nih buat yang suka hemat.",
-        "Wah, promo ini sering dicari orang juga!",
+        "Cocok nih buat yang suka hemat!",
+        "Wah, promo ini sering banget dicari orang juga!",
         "Mantap, bisa dipakai tiap akhir pekan lho!"
     ])
 
@@ -53,13 +56,24 @@ def detect_intent(text: str) -> str:
     if re.search(r"\b(dah|bye|sampai jumpa)\b", text): return "goodbye"
     return "promo"
 
-def find_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    q = query.lower().strip()
+# =============== SMART SEARCH (AI-ASSISTED MATCHING) ===============
+def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
+    """Gunakan model Gemini buat ambil kata kunci penting dari pertanyaan user."""
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
+    try:
+        keywords = model.generate_content(prompt).text.lower().split(",")
+        keywords = [k.strip() for k in keywords if k.strip()]
+    except Exception:
+        keywords = [query.lower()]
+
     mask = pd.Series([False] * len(df))
-    for c in df.columns:
-        mask |= df[c].astype(str).str.lower().str.contains(q, na=False)
+    for kw in keywords:
+        for c in df.columns:
+            mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
     return df[mask]
 
+# =============== UI CHAT ===============
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -71,6 +85,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
     intent = detect_intent(prompt)
     answer = ""
 
+    # ---- Greet, Smalltalk, Dll ----
     if intent == "greeting":
         if "pagi" in prompt.lower(): greet = "Selamat pagi 🌞"
         elif "siang" in prompt.lower(): greet = "Selamat siang ☀️"
@@ -88,8 +103,9 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
     elif intent == "goodbye":
         answer = "Sampai jumpa ya! Semoga harimu menyenangkan dan dapet promo terbaik 🛍️"
 
+    # ---- Promo Search ----
     else:
-        matches = find_matches(df, prompt)
+        matches = find_smart_matches(df, prompt)
         if matches.empty:
             try:
                 model = genai.GenerativeModel("gemini-2.5-flash")
@@ -106,7 +122,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
             for _, r in matches.iterrows():
                 promos.append(
                     f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                    f"📅 {r.get('PERIODE','')}\n📝 {r.get('SYARAT_UTAMA','')}\n💰 {r.get('DETAIL_DISKON','')}\n🏦 {r.get('BANK_PROVIDER','')}"
+                    f"📅 {r.get('PERIODE','')}\n📝 {r.get('SYARAT_UTAMA','')}\n💰 {r.get('DETAIL_DISKON','')}\n🏦 {r.get('BANK_PROV','')}"
                 )
             hasil = "\n\n".join(promos)
             try:
@@ -117,6 +133,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
             except Exception:
                 answer = hasil + "\n\n" + random_comment()
 
+    # ---- Tampilkan Balasan ----
     with st.chat_message("assistant"):
         st.markdown(answer)
 
