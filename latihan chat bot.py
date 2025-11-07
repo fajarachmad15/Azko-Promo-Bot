@@ -68,6 +68,9 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
+# ==========================================================
+# === FUNGSI DETEKSI INTENT (DIPERBARUI) ===
+# ==========================================================
 @st.cache_data(ttl=3600)
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
@@ -82,28 +85,38 @@ def detect_intent_ai(text: str) -> str:
 
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
+        # Prompt diperbarui agar bisa bedakan "mencari promo" vs "bertanya ttg bot"
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
-        Pilih HANYA SATU dari kategori ini: [promo, smalltalk, other]
+        Pilih HANYA SATU dari kategori ini: [promo_search, smalltalk, other]
         
-        - "promo": Semua pertanyaan tentang diskon, voucher, bank, metode pembayaran, cashback, dll. (TERMASUK TYPO seperti 'vucher', 'voucer', 'discon', dll).
-        - "smalltalk": Basa-basi (apa kabar, lagi apa, kamu siapa).
-        - "other": Pertanyaan di luar topik promo.
+        - "promo_search": User MENCARI info promo spesifik. (Contoh: "ada promo apa", "cicilan BCA", "voucher MAP", "diskon BSI").
+        - "smalltalk": Basa-basi ATAU pertanyaan TENTANG kamu (si bot). (Contoh: "apa kabar", "kamu siapa", "bener kamu bisa jawab?", "lagi apa").
+        - "other": Pertanyaan di luar topik.
         
         User: "{text}"
         Intent:
         """
         response = model.generate_content(prompt).text.strip().lower()
         
-        if "promo" in response: return "promo"
+        # Ganti 'promo_search' menjadi 'promo' untuk konsistensi kode
+        if "promo_search" in response: return "promo"
         if "smalltalk" in response: return "smalltalk"
         if "other" in response: return "other"
-        return "promo"
+        
+        # Fallback jika AI menjawab aneh
+        if "promo" in text: return "promo"
+        return "smalltalk"
     except Exception:
-        return "promo"
+        # Failsafe jika API call gagal
+        if "promo" in text: return "promo"
+        return "smalltalk"
+# ==========================================================
+# === AKHIR PERBAIKAN ===
+# ==========================================================
 
 # ==========================================================
-# === FUNGSI PENCARIAN DIPERBAIKI (LOGIKA SKOR) ===
+# === FUNGSI PENCARIAN (LOGIKA SKOR) (Ini sudah bagus, tidak diubah) ===
 # ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     # Selalu buat salinan untuk pengerjaan
@@ -148,8 +161,9 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     # Kembalikan semua baris yang punya skor = skor maksimum
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
 # ==========================================================
-# === AKHIR PERBAIKAN ===
+# === AKHIR FUNGSI PENCARIAN ===
 # ==========================================================
+
 
 # --- UI CHAT ---
 for msg in st.session_state.messages:
@@ -189,8 +203,39 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         elif "malam" in prompt: greet = "Selamat malam 🌙"
         answer = f"{greet}! Aku Kozy, asisten promo internal AZKO. Ada yang bisa dibantu?"
 
+    # ==========================================================
+    # === BLOK SMALLTALK (DIPERBARUI DENGAN AI) ===
+    # ==========================================================
     elif intent == "smalltalk":
-        answer = "Aku Kozy, asisten AI kamu. Siap bantu cari info promo. Ada yang ditanyakan soal promo?"
+        # Gunakan AI untuk jawaban 'tidak kaku'
+        try:
+            with st.spinner("..."):
+                model = genai.GenerativeModel("models/gemini-flash-latest")
+                # Prompt dengan persona
+                prompt_smalltalk = f"""
+                Kamu adalah Kozy, asisten kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point (seperti teman kerja).
+                User baru saja bilang: "{prompt}"
+                Beri respon smalltalk yang sesuai. JANGAN mencari promo.
+                
+                Contoh 1:
+                User: bener kamu bisa jawab seputar promo?
+                Kamu: Bener dong, coba aja siapa takut! 😉 Ada promo apa yang kamu cari?
+                
+                Contoh 2:
+                User: kamu siapa?
+                Kamu: Aku Kozy, asisten promo kamu. Siap bantu!
+                
+                Contoh 3:
+                User: lagi apa?
+                Kamu: Lagi nungguin kamu nanya soal promo nih. Ada yang bisa dibantu?
+                """
+                answer = model.generate_content(prompt_smalltalk).text.strip()
+        except Exception:
+            # Failsafe jika AI gagal
+            answer = "Aku Kozy, asisten AI kamu. Siap bantu cari info promo. Ada yang ditanyakan soal promo?"
+    # ==========================================================
+    # === AKHIR PERBAIKAN ===
+    # ==========================================================
 
     elif intent == "thanks":
         answer = "Sama-sama! 👍 Lanjut cari info lain?"
@@ -200,15 +245,11 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # Panggil fungsi find_smart_matches yang sudah diperbaiki
-            # Kita passing df_original yang bersih setiap kali
+            # Panggil fungsi find_smart_matches
             matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
-                # ==========================================================
-                # === BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah) ===
-                # ==========================================================
-                
+                # --- BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah, ini sudah benar) ---
                 is_voucher_query = False
                 try:
                     with st.spinner("Menganalisis pertanyaan..."):
@@ -267,37 +308,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 else:
                     # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
                     answer = not_found_non_voucher_answer
-                # ==========================================================
-                # === AKHIR BLOK JIKA DATA TIDAK DITEMUKAN ===
-                # ==========================================================
 
             else:
-                # ✅ Jika ada promo yang cocok (logika skor berhasil)
-                promos = []
-                for _, r in matches.iterrows():
-                    promos.append(
-                        f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                        f"📅 Periode: {r.get('PERIODE','')}\n"
-                        f"📝 {r.get('SYARAT_UTAMA','')}\n"
-                        f"💰 {r.get('DETAIL_DISKON','')}\n"
-                        f"🏦 Bank: {r.get('BANK_PARTNER','')}"
-                    )
-                hasil = "\n\n".join(promos)
-                
-                # Jawaban standar tanpa sugesti AI
-                answer = "Oke, aku nemu info ini di database:\n\n" + hasil
-        
-        except Exception as e:
-            st.error(f"Error saat proses promo: {e}")
-            answer = default_fallback_answer
-
-    else: # Ini adalah intent "other"
-        answer = "Hmm, maaf, aku Kozy asisten promo. Untuk pertanyaan di luar info promo, aku belum bisa bantu. Ada info promo yang mau dicari?"
-
-    # --- OUTPUT KE CHAT ---
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-
-    st.session_state.messages.append({"role": "assistant", "content": answer})
-    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
-    st.session_state.last_intent = intent
+                # ==========================================================
+                # === BLOK JIKA DATA DITEMUKAN (DIPERBARUI D
