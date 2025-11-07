@@ -100,7 +100,11 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     mask = pd.Series([False] * len(df))
     for kw in keywords:
         for c in df.columns:
-            mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
+            # Pastikan kolom adalah string sebelum menggunakan .str
+            if pd.api.types.is_string_dtype(df[c]):
+                mask |= df[c].str.lower().str.contains(kw, na=False)
+            else:
+                mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
     return df[mask]
 
 # --- UI CHAT ---
@@ -118,6 +122,15 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
         st.session_state.context = ""
     
     answer = ""
+    
+    # Jawaban default jika terjadi error
+    default_fallback_answer = "Duh, maaf, Kozy lagi agak bingung nih. Boleh diulang pertanyaannya?"
+    # Jawaban "tanya finrep" sesuai permintaan Anda
+    finrep_answer = (
+        "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih, kak. "
+        "Untuk lebih pastinya, boleh tolong ditanyakan langsung ke finance rep area kamu ya 😊"
+    )
+
 
     if intent == "greeting":
         greet = "Halo 👋"
@@ -137,37 +150,85 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
         answer = "Sampai jumpa ya! Semoga harimu menyenangkan dan dapet promo terbaik 🛍️"
 
     elif intent == "promo":
-        matches = find_smart_matches(df, prompt)
+        try:
+            matches = find_smart_matches(df, prompt)
 
-        if matches.empty:
-            # ✅ Kalau tidak ada promo yang cocok
-            answer = (
-                "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih. "
-                "Untuk lebih pastinya, silakan tanya langsung ke finance rep area kamu ya 😊"
-            )
-        else:
-            # ✅ Jika ada promo yang cocok
-            promos = []
-            for _, r in matches.iterrows():
-                promos.append(
-                    f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                    f"📅 Periode: {r.get('PERIODE','')}\n"
-                    f"📝 {r.get('SYARAT_UTAMA','')}\n"
-                    f"💰 {r.get('DETAIL_DISKON','')}\n"
-                    f"🏦 Bank: {r.get('BANK_PARTNER','')}"
-                )
-            hasil = "\n\n".join(promos)
+            if matches.empty:
+                # === BLOK MODIFIKASI DIMULAI ===
+                # Promo tidak ada di database. Cek ke AI apakah ini voucher eksklusif toko lain (Indomart)
+                # atau hanya voucher yg belum terdata (Ultra).
+                
+                try:
+                    # 1. Buat model AI khusus untuk pengecekan
+                    check_model = genai.GenerativeModel("models/gemini-flash-latest")
+                    
+                    # 2. Buat prompt pengecekan
+                    check_prompt = f"""
+                    Kamu adalah sistem filter untuk chatbot Kozy di toko retail AZKO.
+                    Aku tidak menemukan promo untuk '{prompt}' di databasku.
+                    Berdasarkan pengetahuan umummu, apakah '{prompt}' ini adalah promo yang PASTI hanya berlaku di tempat lain 
+                    (contoh: 'voucher Indomart' hanya di Indomart, 'diskon Shopee' hanya di Shopee)?
+                    
+                    Jawab HANYA dengan salah satu dari dua ini:
+                    1. 'YA' jika kamu sangat yakin ini EKSKLUSIF untuk tempat lain.
+                    2. 'TIDAK' jika ini adalah voucher/promo umum (seperti 'voucher Ultra') atau jika kamu tidak yakin.
+                    """
+                    
+                    ai_check_response = check_model.generate_content(check_prompt).text.strip().upper()
 
-            try:
-                model = genai.GenerativeModel("models/gemini-flash-latest")
-                instr = (
-                    "Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat. "
-                    "Sampaikan hasil promo berikut dengan gaya natural seperti asisten pribadi."
-                )
-                resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
-            except Exception:
-                answer = hasil + "\n\n" + random_comment()
+                    if "YA" in ai_check_response:
+                        # KASUS 1: (Voucher Indomart) - AI yakin ini eksklusif.
+                        # Kita minta AI merumuskan jawabannya.
+                        
+                        explain_model = genai.GenerativeModel("models/gemini-flash-latest")
+                        explain_prompt = f"""
+                        Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat.
+                        User baru saja bertanya soal '{prompt}'.
+                        Jelaskan dengan ramah dan singkat bahwa voucher/promo itu sepertinya spesifik untuk toko/platform lain dan tidak bisa digunakan di AZKO.
+                        Gunakan sapaan "kak".
+                        Contoh balasan: "Oh, untuk voucher Indomart, sepertinya itu hanya bisa dipakai di Indomart saja ya, kak."
+                        """
+                        answer = explain_model.generate_content(explain_prompt).text
+
+                    else:
+                        # KASUS 2: (Voucher Ultra) - AI tidak yakin / ini promo umum.
+                        # Beri jawaban "belum terdata, tanya finrep".
+                        answer = finrep_answer
+                
+                except Exception as e:
+                    # Failsafe jika AI check gagal, kembali ke jawaban aman
+                    st.error(f"AI Check Gagal: {e}") # Untuk debugging Anda
+                    answer = finrep_answer
+                # === BLOK MODIFIKASI SELESAI ===
+
+            else:
+                # ✅ Jika ada promo yang cocok (LOGIKA LAMA ANDA, SUDAH BAGUS)
+                promos = []
+                for _, r in matches.iterrows():
+                    promos.append(
+                        f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
+                        f"📅 Periode: {r.get('PERIODE','')}\n"
+                        f"📝 {r.get('SYARAT_UTAMA','')}\n"
+                        f"💰 {r.get('DETAIL_DISKON','')}\n"
+                        f"🏦 Bank: {r.get('BANK_PARTNER','')}"
+                    )
+                hasil = "\n\n".join(promos)
+
+                try:
+                    model = genai.GenerativeModel("models/gemini-flash-latest")
+                    instr = (
+                        "Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat. "
+                        "Sampaikan hasil promo berikut dengan gaya natural seperti asisten pribadi."
+                    )
+                    resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
+                    answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
+                except Exception:
+                    answer = hasil + "\n\n" + random_comment()
+        
+        except Exception as e:
+            st.error(f"Error saat proses promo: {e}")
+            answer = default_fallback_answer
+
 
     else:
         answer = "Hmm, bisa dijelaskan sedikit lagi maksud kamu? Mau bahas promo atau hal lain?"
