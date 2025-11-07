@@ -58,54 +58,82 @@ if "messages" not in st.session_state:
 if "last_intent" not in st.session_state:
     st.session_state.last_intent = "greeting"
 
-STOPWORDS = {"di","ke","yang","dan","dari","untuk","ya","ini","itu","dong","nih"}
+STOPWORDS = {"di", "ke", "yang", "dan", "dari", "untuk", "ya", "ini", "itu", "dong", "nih", "dgn", "pakai"}
 
-# --- FUNGSI ---
-def prepare_tokens(q):
-    q = q.lower()
-    return [t for t in re.findall(r"\w+", q) if t not in STOPWORDS]
+# --- FUNGSI UTIL ---
+def prepare_tokens(q: str):
+    q = (q or "").lower()
+    tokens = re.findall(r"\w+", q)
+    tokens = [t for t in tokens if t not in STOPWORDS]
+    return tokens
 
-def count_column_matches(row, tokens):
-    cols = ['NAMA_PROMO','PERIODE','SYARAT_UTAMA','DETAIL_DISKON','BANK_PARTNER']
+def count_column_matches(row: pd.Series, tokens: list):
+    cols = ['NAMA_PROMO', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
     count = 0
     for col in cols:
-        text = str(row.get(col, '')).lower()
+        text = str(row.get(col, "")).lower()
         if any(t in text for t in tokens):
             count += 1
     return count
 
-def count_keyword_matches(row, tokens):
-    all_text = " ".join(str(v).lower() for v in row.values())
+def count_keyword_matches(row: pd.Series, tokens: list):
+    # safer: use row.tolist() then join, convert to lowercase
+    all_text = " ".join(map(str, row.tolist())).lower()
     return sum(1 for t in tokens if t in all_text)
 
-def find_smart_matches(df, query):
+def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     tokens = prepare_tokens(query)
-    results = []
-    for _, row in df.iterrows():
+    results = []  # list of tuples (index, row, level)
+
+    # quick path: prefer active promos first (if column exists)
+    prefer_active = 'PROMO_STATUS' in df.columns
+
+    rows_iter = df.iterrows()
+    for idx, row in rows_iter:
+        # If prefer active, skip non-AKTIF to speed up (but still allow if no active found later)
+        if prefer_active and str(row.get('PROMO_STATUS', '')).strip().upper() != "AKTIF":
+            # mark but still consider later by skipping now
+            pass
+
         cm = count_column_matches(row, tokens)
         km = count_keyword_matches(row, tokens)
+
         if cm >= 2:
-            results.append((row, "high"))
+            results.append((idx, row, "high"))
         elif km >= 2:
-            results.append((row, "medium"))
-    if results:
-        highs = [r for r, lvl in results if lvl == "high"]
-        meds = [r for r, lvl in results if lvl == "medium"]
-        return pd.DataFrame(highs or meds)
-    return pd.DataFrame()
+            results.append((idx, row, "medium"))
+        # else ignore
 
-def detect_intent(text):
-    text = text.lower()
-    if re.search(r"\b(halo|hai|hi|hello|selamat (pagi|siang|sore|malam))\b", text): return "greeting"
-    if re.search(r"\b(terima kasih|makasih|thanks)\b", text): return "thanks"
-    if re.search(r"\b(bye|dah|sampai jumpa)\b", text): return "goodbye"
-    return "promo"
+    if not results:
+        return pd.DataFrame()  # empty
 
-# --- UI ---
+    # prefer high-confidence results
+    high_rows = [r for i, r, lvl in results if lvl == "high"]
+    med_rows = [r for i, r, lvl in results if lvl == "medium"]
+
+    chosen = high_rows if high_rows else med_rows
+    # convert list of Series to DataFrame (reset index)
+    return pd.DataFrame(chosen)
+
+def detect_intent(text: str) -> str:
+    t = (text or "").lower()
+    if re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", t):
+        return "greeting"
+    if re.search(r"\b(terima kasih|makasih|thanks)\b", t):
+        return "thanks"
+    if re.search(r"\b(bye|dah|sampai jumpa)\b", t):
+        return "goodbye"
+    # promo-related keywords (expanded)
+    if re.search(r"\b(promo|diskon|potongan|harga|cashback|bank|voucher|kupon|pluxee|evoucher|e-voucher|map|nota|manual|kode)\b", t):
+        return "promo"
+    return "other"
+
+# --- UI CHAT ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
+# --- INPUT CHAT ---
 if prompt := st.chat_input("Ketik pertanyaan di sini..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -114,40 +142,49 @@ if prompt := st.chat_input("Ketik pertanyaan di sini..."):
     answer = ""
 
     if intent == "greeting":
-        answer = "Halo! Kozy bantu cek ya, kamu mau info promo atau aturan voucher tertentu?"
+        answer = "Halo. Kozy bantu cek ya — mau info promo atau aturan voucher apa?"
     elif intent == "thanks":
-        answer = "Siap, sama-sama! Kalau mau cek promo lain, langsung ketik aja ya."
+        answer = "Sama-sama. Kalau mau cek promo lain tinggal ketik."
     elif intent == "goodbye":
-        answer = "Sip, makasih udah pakai Kozy. Semoga shift-nya lancar! 👋"
-    else:
+        answer = "Sip, semoga shift-nya lancar. 👋"
+    elif intent == "promo":
         matches = find_smart_matches(df, prompt)
+
         if matches.empty:
+            # fallback message (concise & internal)
             answer = (
-                "Hmm, sepertinya promo atau voucher itu belum ada di data aku nih. "
-                "Biar nggak salah info, coba tanyakan langsung ke *finance rep area kamu* aja ya 😊"
+                "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih. "
+                "Untuk lebih pastinya, silakan tanyakan langsung ke finance rep area kamu ya 😊"
             )
         else:
+            # format results for internal/cashier tone
             promos = []
             for _, r in matches.iterrows():
                 promos.append(
-                    f"**{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                    f"📅 Periode: {r.get('PERIODE','')}\n"
-                    f"📝 {r.get('SYARAT_UTAMA','')}\n"
-                    f"💰 {r.get('DETAIL_DISKON','')}\n"
-                    f"🏦 Bank: {r.get('BANK_PARTNER','')}"
+                    f"• **{r.get('NAMA_PROMO','')}** — {r.get('PROMO_STATUS','')}\n"
+                    f"  Periode: {r.get('PERIODE','')}\n"
+                    f"  Syarat utama: {r.get('SYARAT_UTAMA','')}\n"
+                    f"  Detail: {r.get('DETAIL_DISKON','')}\n"
+                    f"  Bank/Partner: {r.get('BANK_PARTNER','')}"
                 )
             hasil = "\n\n".join(promos)
+
+            # Use Gemini to rephrase in internal tone, but keep it short
             model = genai.GenerativeModel("models/gemini-flash-latest")
             instr = (
                 "Kamu adalah Kozy, asisten internal untuk cashier AZKO. "
-                "Gunakan bahasa kerja yang sopan tapi lugas. "
-                "Sampaikan hasil promo di bawah dengan jelas, hindari gaya promosi ke pelanggan."
+                "Gunakan bahasa kerja yang sopan, lugas, dan singkat. "
+                "Sampaikan hanya informasi relevan untuk cashier, jangan bersikap seperti layanan pelanggan."
             )
             try:
                 resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                answer = getattr(resp, "text", hasil)
+                # prefer model text but fallback to hasil if empty
+                model_text = getattr(resp, "text", "").strip()
+                answer = model_text if model_text else hasil
             except Exception:
                 answer = hasil
+    else:
+        answer = "Maaf, bisa jelaskan maksudnya sedikit lagi? Mau bahas promo/voucher atau hal lain?"
 
     with st.chat_message("assistant"):
         st.markdown(answer)
