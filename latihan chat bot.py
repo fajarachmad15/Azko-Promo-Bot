@@ -212,13 +212,13 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
             matches = find_smart_matches(df, prompt)
 
             if matches.empty:
-                # === INI ADALAH LOGIKA 3 LANGKAH YANG ANDA MINTA ===
+                # === BLOK MODIFIKASI BARU (SESUAI LOGIKA 3 LANGKAH ANDA) ===
                 
                 # Cek dulu ini soal voucher atau bukan
                 is_voucher = is_voucher_query(prompt)
                 
                 if is_voucher:
-                    # --- LOGIKA 3 LANGKAH (VOUCHER) ---
+                    # --- INI LOGIKA 3 LANGKAH (VOUCHER) ---
                     
                     # 1. Narasi Cek Database
                     narasi_1 = f"Hmm, aku cek di databasku, info untuk **'{prompt}'** memang belum ter-update nih."
@@ -227,4 +227,67 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                     clarity = get_voucher_clarity(prompt)
                     
                     narasi_2 = "" # Dikosongkan dulu
-                    if clarity == "TIDAK_BERL
+                    if clarity == "TIDAK_BERLAKU":
+                        narasi_2 = "Setelah aku cek silang, voucher itu sepertinya memang **khusus untuk di merchant lain** ya (tidak berlaku di AZKO)."
+                    elif clarity == "TIDAK_DIKETAHUI":
+                        # (Kasus Ultra/MAP/Telkomsel yang tidak dikenal AI)
+                        narasi_2 = "Aku coba cek silang ke sistem AI, tapi infonya juga **belum ada** di sana."
+                    
+                    # 3. Narasi Template Respon (Finrep)
+                    narasi_3 = "Untuk kepastian 100%, boleh tolong **cek info terbaru dari Partnership/PNA** atau langsung **kontak Finrep Area kamu** ya. Biar aman. 👍"
+                    
+                    # Gabungkan jawabannya
+                    answer = f"{narasi_1}\n\n{narasi_2}\n\n{narasi_3}"
+                    
+                else:
+                    # --- INI LOGIKA 2 LANGKAH (BUKAN VOUCHER) ---
+                    # Contoh: "promo bank UOB" (tidak ada di database)
+                    
+                    # 1. Narasi Cek Database
+                    narasi_1 = f"Hmm, aku cek di sistem, data untuk promo **'{prompt}'** sepertinya **belum ter-update** nih."
+                    
+                    # 3. Narasi Template Respon (Finrep)
+                    narasi_3 = "Info lebih pastinya, coba **kontak Finrep Area kamu** ya, biar aman. 👍"
+                    
+                    answer = f"{narasi_1}\n\n{narasi_3}"
+                
+                # === BLOK MODIFIKASI SELESAI ===
+
+            else:
+                # ✅ Jika ada promo yang cocok (LOGIKA LAMA ANDA, SUDAH BAGUS)
+                promos = []
+                for _, r in matches.iterrows():
+                    promos.append(
+                        f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
+                        f"📅 Periode: {r.get('PERIODE','')}\n"
+                        f"📝 {r.get('SYARAT_UTAMA','')}\n"
+                        f"💰 {r.get('DETAIL_DISKON','')}\n"
+                        f"🏦 Bank: {r.get('BANK_PARTNER','')}"
+                    )
+                hasil = "\n\n".join(promos)
+
+                try:
+                    model = genai.GenerativeModel("models/gemini-flash-latest")
+                    instr = (
+                        "Kamu adalah Kozy, asisten internal kasir AZKO. "
+                        "Sampaikan hasil promo ini dengan jelas dan ringkas. Pastikan kasir mudah mengerti."
+                    )
+                    resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
+                    answer = getattr(resp, "text", hasil)
+                except Exception:
+                    answer = hasil
+        
+        except Exception as e:
+            st.error(f"Error saat proses promo: {e}")
+            answer = default_fallback_answer
+
+    else: # Ini adalah intent "other"
+        answer = "Hmm, maaf, aku Kozy asisten promo. Untuk pertanyaan di luar info promo, aku belum bisa bantu. Ada info promo yang mau dicari?"
+
+    # --- OUTPUT KE CHAT ---
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
+    st.session_state.last_intent = intent
