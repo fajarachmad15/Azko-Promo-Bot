@@ -83,10 +83,7 @@ def detect_intent_ai(text: str) -> str:
 
     # 2. Gunakan AI untuk membedakan "promo" dari "other" (basa-basi/di luar topik)
     try:
-        # === PERBAIKAN ===
         model = genai.GenerativeModel("models/gemini-flash-latest")
-        # === PERBAIKAN SELESAI ===
-        
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
         Pilih HANYA SATU dari kategori ini: [promo, smalltalk, other]
@@ -112,10 +109,7 @@ def detect_intent_ai(text: str) -> str:
         return "promo"
 
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    # === PERBAIKAN ===
     model = genai.GenerativeModel("models/gemini-flash-latest")
-    # === PERBAIKAN SELESAI ===
-    
     # Prompt ini sudah bagus, akan menangani typo "vucher" menjadi "voucher"
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
@@ -193,17 +187,14 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
             if matches.empty:
                 # ==========================================================
-                # === BLOK MODIFIKASI BARU (Voucher vs Non-Voucher) ===
+                # === BLOK JIKA DATA TIDAK DITEMUKAN ===
                 # ==========================================================
                 
                 is_voucher_query = False
                 try:
                     # 1. Cek dulu apakah ini pertanyaan soal "voucher"
                     with st.spinner("Menganalisis pertanyaan..."):
-                        # === PERBAIKAN ===
                         check_model = genai.GenerativeModel("models/gemini-flash-latest")
-                        # === PERBAIKAN SELESAI ===
-                        
                         check_prompt = f"""
                         Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
                         User: "{prompt}"
@@ -228,10 +219,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         # Langkah 2: Tanya Gemini
                         step_2_gemini = ""
                         with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
-                            # === PERBAIKAN ===
                             gemini_model = genai.GenerativeModel("models/gemini-flash-latest") # Pakai model cepat
-                            # === PERBAIKAN SELESAI ===
-                            
                             gemini_prompt = f"""
                             Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
                             Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
@@ -272,11 +260,11 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                     # Jika bukan voucher (misal "promo bank BRI"), langsung beri jawaban "belum terdata".
                     answer = not_found_non_voucher_answer
                 # ==========================================================
-                # === AKHIR BLOK MODIFIKASI BARU ===
+                # === AKHIR BLOK JIKA DATA TIDAK DITEMUKAN ===
                 # ==========================================================
 
             else:
-                # ✅ Jika ada promo yang cocok (LOGIKA LAMA ANDA, SUDAH BAGUS)
+                # ✅ Jika ada promo yang cocok
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
@@ -287,21 +275,16 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         f"🏦 Bank: {r.get('BANK_PARTNER','')}"
                     )
                 hasil = "\n\n".join(promos)
-
-                try:
-                    # === PERBAIKAN ===
-                    model = genai.GenerativeModel("models/gemini-flash-latest")
-                    # === PERBAIKAN SELESAI ===
-                    
-                    # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
-                    instr = (
-                        "Kamu adalah Kozy, asisten internal kasir AZKO. "
-                        "Sampaikan hasil promo ini dengan jelas dan ringkas. Pastikan kasir mudah mengerti."
-                    )
-                    resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                    answer = getattr(resp, "text", hasil) 
-                except Exception:
-                    answer = hasil
+                
+                # ==========================================================
+                # === MODIFIKASI: Hapus "sugesti" AI ===
+                # ==========================================================
+                # Sesuai permintaan, bot hanya menjawab apa adanya dari database.
+                # AI perangkum (sugesti) dihapus untuk menghindari halusinasi.
+                answer = "Oke, aku nemu info ini di database:\n\n" + hasil
+                # ==========================================================
+                # === AKHIR MODIFIKASI ===
+                # ==========================================================
         
         except Exception as e:
             st.error(f"Error saat proses promo: {e}")
