@@ -81,7 +81,7 @@ def detect_intent(text: str) -> str:
     if re.search(r"\b(apa kabar|gimana kabar|lagi ngapain)\b", text): return "smalltalk"
     if re.search(r"\b(terima kasih|makasih|thanks)\b", text): return "thanks"
     if re.search(r"\b(dah|bye|sampai jumpa)\b", text): return "goodbye"
-    if re.search(r"\b(promo|diskon|potongan|harga|cashback|bank)\b", text): return "promo"
+    if re.search(r"\b(promo|diskon|potongan|harga|cashback|bank|voucher)\b", text): return "promo"
     return "other"
 
 def detect_topic_change(last_intent: str, new_text: str):
@@ -138,18 +138,15 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
 
     elif intent == "promo":
         matches = find_smart_matches(df, prompt)
+
         if matches.empty:
-            model = genai.GenerativeModel("models/gemini-flash-latest")
-            instr = (
-                "Kamu adalah Kozy, asisten promo AZKO yang ramah. "
-                "Jika user menanyakan promo yang tidak ada, jawab sopan dan arahkan ke finance rep."
+            # ✅ Kalau tidak ada promo yang cocok
+            answer = (
+                "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih. "
+                "Untuk lebih pastinya, silakan tanya langsung ke finance rep area kamu ya 😊"
             )
-            try:
-                resp = model.generate_content(instr + "\nUser: " + prompt)
-                answer = getattr(resp, "text", "Maaf, promo itu belum tersedia. Coba hubungi finance rep area kamu ya 🙏")
-            except Exception:
-                answer = "Maaf, promo itu belum tersedia. Coba hubungi finance rep area kamu ya 🙏"
         else:
+            # ✅ Jika ada promo yang cocok
             promos = []
             for _, r in matches.iterrows():
                 promos.append(
@@ -160,9 +157,13 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
                     f"🏦 Bank: {r.get('BANK_PARTNER','')}"
                 )
             hasil = "\n\n".join(promos)
+
             try:
                 model = genai.GenerativeModel("models/gemini-flash-latest")
-                instr = "Sampaikan hasil promo berikut dengan gaya hangat dan natural seperti asisten pribadi."
+                instr = (
+                    "Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat. "
+                    "Sampaikan hasil promo berikut dengan gaya natural seperti asisten pribadi."
+                )
                 resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
                 answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
             except Exception:
@@ -171,6 +172,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
     else:
         answer = "Hmm, bisa dijelaskan sedikit lagi maksud kamu? Mau bahas promo atau hal lain?"
 
+    # --- OUTPUT KE CHAT ---
     with st.chat_message("assistant"):
         st.markdown(answer)
 
