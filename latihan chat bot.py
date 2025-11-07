@@ -67,12 +67,10 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
-# ✨ FUNGSI BARU: Deteksi intent menggunakan AI (Gemini)
-@st.cache_data(ttl=3600) # Cache hasil agar tidak boros API
+@st.cache_data(ttl=3600)
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
     
-    # 1. Handle sapaan umum non-AI agar cepat
     simple_greetings = re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text)
     simple_thanks = re.search(r"\b(terima kasih|makasih|thanks|tq)\b", text)
     simple_goodbye = re.search(r"\b(dah|bye|sampai jumpa|exit)\b", text)
@@ -81,7 +79,6 @@ def detect_intent_ai(text: str) -> str:
     if simple_thanks: return "thanks"
     if simple_goodbye: return "goodbye"
 
-    # 2. Gunakan AI untuk membedakan "promo" dari "other" (basa-basi/di luar topik)
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
         prompt = f"""
@@ -97,36 +94,51 @@ def detect_intent_ai(text: str) -> str:
         """
         response = model.generate_content(prompt).text.strip().lower()
         
-        # Membersihkan respons AI
         if "promo" in response: return "promo"
         if "smalltalk" in response: return "smalltalk"
         if "other" in response: return "other"
-        
-        # Fallback jika AI menjawab aneh, anggap saja "promo"
         return "promo"
     except Exception:
-        # Failsafe jika API call gagal, anggap "promo"
         return "promo"
 
+# ==========================================================
+# === FUNGSI PENCARIAN DIPERBAIKI (LOGIKA AND) ===
+# ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     model = genai.GenerativeModel("models/gemini-flash-latest")
-    # Prompt ini sudah bagus, akan menangani typo "vucher" menjadi "voucher"
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
         keywords = model.generate_content(prompt).text.lower().split(",")
         keywords = [k.strip() for k in keywords if k.strip()]
     except Exception:
-        keywords = [query.lower()]
+        # Fallback jika AI gagal: ambil semua kata unik
+        keywords = list(set(re.findall(r'\b\w{3,}\b', query.lower()))) # Ambil kata > 2 huruf
 
-    mask = pd.Series([False] * len(df))
+    if not keywords:
+        return pd.DataFrame(columns=df.columns) # Return empty if no keywords
+
+    # Mulai dengan mask SEMUA BENAR (untuk logika AND)
+    final_mask = pd.Series([True] * len(df))
+
     for kw in keywords:
+        # Mask untuk keyword ini (awalnya SEMUA SALAH)
+        kw_mask = pd.Series([False] * len(df))
         for c in df.columns:
-            # Pastikan kolom adalah string sebelum menggunakan .str
+            # Cek apakah kolom adalah string
             if pd.api.types.is_string_dtype(df[c]):
-                mask |= df[c].str.lower().str.contains(kw, na=False)
+                kw_mask |= df[c].str.lower().str.contains(kw, na=False)
             else:
-                mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
-    return df[mask]
+                # Konversi non-string ke string untuk dicari
+                kw_mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
+        
+        # Gabungkan hasil keyword ini dengan mask final (logika AND)
+        # Ini memastikan baris HARUS mengandung SEMUA keywords
+        final_mask &= kw_mask
+    
+    return df[final_mask]
+# ==========================================================
+# === AKHIR PERBAIKAN ===
+# ==========================================================
 
 # --- UI CHAT ---
 for msg in st.session_state.messages:
@@ -138,7 +150,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # ✨ LOGIKA BARU: Panggil fungsi AI untuk deteksi intent
     intent = detect_intent_ai(prompt)
     topic_changed = (intent != st.session_state.last_intent)
     
@@ -147,22 +158,17 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     
     answer = ""
     
-    # --- JAWABAN TEMPLATE (MODIFIKASI DI SINI) ---
-    # Jawaban default jika terjadi error
+    # --- JAWABAN TEMPLATE ---
     default_fallback_answer = "Duh, maaf, Kozy lagi agak error nih. Coba tanya lagi ya."
-    
-    # Template final (Langkah 3) untuk arahan ke Finrep
     finrep_template_answer = (
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
-    
-    # Jawaban jika tidak ketemu & BUKAN voucher (langkah 1 + 3)
     not_found_non_voucher_answer = (
         f"Hmm, aku cek di database Kozy, info soal itu **belum ter-update** nih. "
         f"{finrep_template_answer}"
     )
-    # --- AKHIR MODIFIKASI TEMPLATE ---
+    # --- AKHIR TEMPLATE ---
 
     if intent == "greeting":
         greet = "Halo 👋"
@@ -183,16 +189,16 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
+            # Panggil fungsi_find_smart_matches yang sudah diperbaiki
             matches = find_smart_matches(df, prompt)
 
             if matches.empty:
                 # ==========================================================
-                # === BLOK JIKA DATA TIDAK DITEMUKAN ===
+                # === BLOK JIKA DATA TIDAK DITEMUKAN (SEKARANG AKAN JALAN) ===
                 # ==========================================================
                 
                 is_voucher_query = False
                 try:
-                    # 1. Cek dulu apakah ini pertanyaan soal "voucher"
                     with st.spinner("Menganalisis pertanyaan..."):
                         check_model = genai.GenerativeModel("models/gemini-flash-latest")
                         check_prompt = f"""
@@ -204,7 +210,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         if "YA" in check_response:
                             is_voucher_query = True
                 except Exception as e:
-                    # Failsafe: Cek manual jika AI gagal
                     st.warning(f"AI voucher check failed: {e}. Menggunakan cek manual.")
                     prompt_lower = prompt.lower()
                     if "voucher" in prompt_lower or "vucher" in prompt_lower or "voucer" in prompt_lower or "vocer" in prompt_lower:
@@ -213,13 +218,11 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 if is_voucher_query:
                     # --- ALUR 3 LANGKAH (KHUSUS VOUCHER) ---
                     try:
-                        # Langkah 1: Cek Database (Narasi)
                         step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
                         
-                        # Langkah 2: Tanya Gemini
                         step_2_gemini = ""
                         with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
-                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest") # Pakai model cepat
+                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
                             gemini_prompt = f"""
                             Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
                             Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
@@ -236,9 +239,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                             gemini_response = gemini_model.generate_content(gemini_prompt)
                             step_2_gemini = gemini_response.text.strip()
 
-                        # Langkah 3: Template Respon (Sudah ada di `finrep_template_answer`)
-                        
-                        # Gabungkan semua (Gunakan format Markdown list)
+                        # Gabungkan semua
                         answer = (
                             f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
                             f"1. {step_1_db}\n\n"
@@ -248,7 +249,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
                     except Exception as e:
                         st.error(f"AI Gemini check (langkah 2) gagal: {e}")
-                        # Failsafe jika langkah 2 (Gemini) gagal, berikan langkah 1 + 3
                         answer = (
                             f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
                             f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
@@ -257,14 +257,13 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 
                 else:
                     # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
-                    # Jika bukan voucher (misal "promo bank BRI"), langsung beri jawaban "belum terdata".
                     answer = not_found_non_voucher_answer
                 # ==========================================================
                 # === AKHIR BLOK JIKA DATA TIDAK DITEMUKAN ===
                 # ==========================================================
 
             else:
-                # ✅ Jika ada promo yang cocok
+                # ✅ Jika ada promo yang cocok (misal: "Voucher Kawan Lama")
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
@@ -276,15 +275,8 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                     )
                 hasil = "\n\n".join(promos)
                 
-                # ==========================================================
-                # === MODIFIKASI: Hapus "sugesti" AI ===
-                # ==========================================================
-                # Sesuai permintaan, bot hanya menjawab apa adanya dari database.
-                # AI perangkum (sugesti) dihapus untuk menghindari halusinasi.
+                # Jawaban standar tanpa sugesti AI
                 answer = "Oke, aku nemu info ini di database:\n\n" + hasil
-                # ==========================================================
-                # === AKHIR MODIFIKASI ===
-                # ==========================================================
         
         except Exception as e:
             st.error(f"Error saat proses promo: {e}")
