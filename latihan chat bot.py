@@ -67,12 +67,7 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
-# 🛑 FUNGSI LAMA (regex) DIHAPUS: def detect_intent(text: str) -> str:
-# 🛑 FUNGSI LAMA DIHAPUS: def detect_topic_change(last_intent: str, new_text: str):
-# 🛑 FUNGSI LAMA DIHAPUS: def random_comment():
-
 # ✨ FUNGSI BARU: Deteksi intent menggunakan AI (Gemini)
-# Ini akan jauh lebih baik dalam menangani typo seperti "vucher" atau "voucer"
 @st.cache_data(ttl=3600) # Cache hasil agar tidak boros API
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
@@ -88,7 +83,7 @@ def detect_intent_ai(text: str) -> str:
 
     # 2. Gunakan AI untuk membedakan "promo" dari "other" (basa-basi/di luar topik)
     try:
-        model = genai.GenerativeModel("models/gemini-flash-latest")
+        model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
         Pilih HANYA SATU dari kategori ini: [promo, smalltalk, other]
@@ -104,7 +99,7 @@ def detect_intent_ai(text: str) -> str:
         
         # Membersihkan respons AI
         if "promo" in response: return "promo"
-        if "smalltalk" in response: return "smallaltk"
+        if "smalltalk" in response: return "smalltalk"
         if "other" in response: return "other"
         
         # Fallback jika AI menjawab aneh, anggap saja "promo"
@@ -114,7 +109,7 @@ def detect_intent_ai(text: str) -> str:
         return "promo"
 
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    model = genai.GenerativeModel("models/gemini-flash-latest")
+    model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
     # Prompt ini sudah bagus, akan menangani typo "vucher" menjadi "voucher"
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
@@ -152,13 +147,22 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     
     answer = ""
     
+    # --- JAWABAN TEMPLATE (MODIFIKASI DI SINI) ---
     # Jawaban default jika terjadi error
     default_fallback_answer = "Duh, maaf, Kozy lagi agak error nih. Coba tanya lagi ya."
-    # Jawaban "tanya finrep" (nada disesuaikan untuk kasir)
-    finrep_answer = (
-        "Hmm, aku cek di sistem, data untuk voucher/promo itu **belum ter-update** nih. "
-        "Info lebih pastinya, coba **kontak Finrep area kamu** ya, biar aman. 👍"
+    
+    # Template final (Langkah 3) untuk arahan ke Finrep
+    finrep_template_answer = (
+        "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
+        "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
+    
+    # Jawaban jika tidak ketemu & BUKAN voucher (langkah 1 + 3)
+    not_found_non_voucher_answer = (
+        f"Hmm, aku cek di database Kozy, info soal itu **belum ter-update** nih. "
+        f"{finrep_template_answer}"
+    )
+    # --- AKHIR MODIFIKASI TEMPLATE ---
 
     if intent == "greeting":
         greet = "Halo 👋"
@@ -182,50 +186,82 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
             matches = find_smart_matches(df, prompt)
 
             if matches.empty:
-                # === BLOK MODIFIKASI (Indomart vs Ultra) - DARI PERMINTAAN SEBELUMNYA ===
-                # (Ini sudah benar, akan menangani kasus "vucher MAP" dan "voucer ultra")
+                # ==========================================================
+                # === BLOK MODIFIKASI BARU (Voucher vs Non-Voucher) ===
+                # ==========================================================
                 
+                is_voucher_query = False
                 try:
-                    # 1. Buat model AI khusus untuk pengecekan
-                    check_model = genai.GenerativeModel("models/gemini-flash-latest")
-                    
-                    # 2. Buat prompt pengecekan
-                    check_prompt = f"""
-                    Kamu adalah sistem filter untuk chatbot Kozy di toko retail AZKO.
-                    Aku tidak menemukan promo untuk '{prompt}' di databasku.
-                    Berdasarkan pengetahuan umummu, apakah '{prompt}' ini adalah promo yang PASTI hanya berlaku di tempat lain 
-                    (contoh: 'voucher Indomart' hanya di Indomart, 'diskon Shopee' hanya di Shopee)?
-                    
-                    Jawab HANYA dengan salah satu dari dua ini:
-                    1. 'YA' jika kamu sangat yakin ini EKSKLUSIF untuk tempat lain.
-                    2. 'TIDAK' jika ini adalah voucher/promo umum (seperti 'voucher Ultra') atau jika kamu tidak yakin.
-                    """
-                    
-                    ai_check_response = check_model.generate_content(check_prompt).text.strip().upper()
-
-                    if "YA" in ai_check_response:
-                        # KASUS 1: (Voucher Indomart) - AI yakin ini eksklusif.
-                        
-                        explain_model = genai.GenerativeModel("models/gemini-flash-latest")
-                        # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
-                        explain_prompt = f"""
-                        Kamu adalah Kozy, asisten internal untuk kasir AZKO. Nada bicaramu ramah tapi to-the-point.
-                        User (kasir) baru saja bertanya soal '{prompt}'.
-                        Jelaskan dengan singkat dan jelas bahwa voucher/promo itu EKSKLUSIF untuk toko/platform lain dan tidak bisa diterima di AZKO.
-                        Contoh balasan: "Oh, untuk voucher Indomart, itu khusus untuk di Indomart aja ya. Nggak berlaku di AZKO."
+                    # 1. Cek dulu apakah ini pertanyaan soal "voucher"
+                    with st.spinner("Menganalisis pertanyaan..."):
+                        check_model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+                        check_prompt = f"""
+                        Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
+                        User: "{prompt}"
+                        Jawab HANYA 'YA' atau 'TIDAK'.
                         """
-                        answer = explain_model.generate_content(explain_prompt).text
-
-                    else:
-                        # KASUS 2: (Voucher Ultra / Vucher MAP) - AI tidak yakin / ini promo umum.
-                        # Beri jawaban "belum terdata, tanya finrep".
-                        answer = finrep_answer
-                
+                        check_response = check_model.generate_content(check_prompt).text.strip().upper()
+                        if "YA" in check_response:
+                            is_voucher_query = True
                 except Exception as e:
-                    # Failsafe jika AI check gagal, kembali ke jawaban aman
-                    st.error(f"AI Check Gagal: {e}") # Untuk debugging Anda
-                    answer = finrep_answer
-                # === BLOK MODIFIKASI SELESAI ===
+                    # Failsafe: Cek manual jika AI gagal
+                    st.warning(f"AI voucher check failed: {e}. Menggunakan cek manual.")
+                    prompt_lower = prompt.lower()
+                    if "voucher" in prompt_lower or "vucher" in prompt_lower or "voucer" in prompt_lower or "vocer" in prompt_lower:
+                        is_voucher_query = True
+
+                if is_voucher_query:
+                    # --- ALUR 3 LANGKAH (KHUSUS VOUCHER) ---
+                    try:
+                        # Langkah 1: Cek Database (Narasi)
+                        step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
+                        
+                        # Langkah 2: Tanya Gemini
+                        step_2_gemini = ""
+                        with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
+                            gemini_model = genai.GenerativeModel("models/gemini-1.5-flash-latest") # Pakai model cepat
+                            gemini_prompt = f"""
+                            Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
+                            Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
+                            Fokus pada apakah ini voucher umum atau spesifik untuk toko/grup tertentu.
+                            
+                            Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
+                            
+                            Contoh jika user bertanya 'voucher MAP':
+                            "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
+                            
+                            Contoh jika user bertanya 'voucher Ultra Jaya':
+                            "Setelah aku klarifikasi lebih lanjut, voucher produk Ultra Jaya itu biasanya bisa dipakai di banyak supermarket yang bekerja sama."
+                            """
+                            gemini_response = gemini_model.generate_content(gemini_prompt)
+                            step_2_gemini = gemini_response.text.strip()
+
+                        # Langkah 3: Template Respon (Sudah ada di `finrep_template_answer`)
+                        
+                        # Gabungkan semua (Gunakan format Markdown list)
+                        answer = (
+                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                            f"1. {step_1_db}\n\n"
+                            f"2. {step_2_gemini}\n\n"
+                            f"3. {finrep_template_answer}"
+                        )
+
+                    except Exception as e:
+                        st.error(f"AI Gemini check (langkah 2) gagal: {e}")
+                        # Failsafe jika langkah 2 (Gemini) gagal, berikan langkah 1 + 3
+                        answer = (
+                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                            f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
+                            f"2. {finrep_template_answer}"
+                        )
+                
+                else:
+                    # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
+                    # Jika bukan voucher (misal "promo bank BRI"), langsung beri jawaban "belum terdata".
+                    answer = not_found_non_voucher_answer
+                # ==========================================================
+                # === AKHIR BLOK MODIFIKASI BARU ===
+                # ==========================================================
 
             else:
                 # ✅ Jika ada promo yang cocok (LOGIKA LAMA ANDA, SUDAH BAGUS)
@@ -241,17 +277,16 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 hasil = "\n\n".join(promos)
 
                 try:
-                    model = genai.GenerativeModel("models/gemini-flash-latest")
+                    model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
                     # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
                     instr = (
                         "Kamu adalah Kozy, asisten internal kasir AZKO. "
                         "Sampaikan hasil promo ini dengan jelas dan ringkas. Pastikan kasir mudah mengerti."
                     )
                     resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                    # 🛑 Menghapus random_comment()
                     answer = getattr(resp, "text", hasil) 
                 except Exception:
-                    answer = hasil # 🛑 Menghapus random_comment()
+                    answer = hasil
         
         except Exception as e:
             st.error(f"Error saat proses promo: {e}")
