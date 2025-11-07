@@ -83,7 +83,10 @@ def detect_intent_ai(text: str) -> str:
 
     # 2. Gunakan AI untuk membedakan "promo" dari "other" (basa-basi/di luar topik)
     try:
-        model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+        # === PERBAIKAN ===
+        model = genai.GenerativeModel("models/gemini-flash-latest")
+        # === PERBAIKAN SELESAI ===
+        
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
         Pilih HANYA SATU dari kategori ini: [promo, smalltalk, other]
@@ -109,7 +112,10 @@ def detect_intent_ai(text: str) -> str:
         return "promo"
 
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+    # === PERBAIKAN ===
+    model = genai.GenerativeModel("models/gemini-flash-latest")
+    # === PERBAIKAN SELESAI ===
+    
     # Prompt ini sudah bagus, akan menangani typo "vucher" menjadi "voucher"
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
@@ -194,7 +200,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 try:
                     # 1. Cek dulu apakah ini pertanyaan soal "voucher"
                     with st.spinner("Menganalisis pertanyaan..."):
-                        check_model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+                        # === PERBAIKAN ===
+                        check_model = genai.GenerativeModel("models/gemini-flash-latest")
+                        # === PERBAIKAN SELESAI ===
+                        
                         check_prompt = f"""
                         Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
                         User: "{prompt}"
@@ -219,7 +228,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         # Langkah 2: Tanya Gemini
                         step_2_gemini = ""
                         with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
-                            gemini_model = genai.GenerativeModel("models/gemini-1.5-flash-latest") # Pakai model cepat
+                            # === PERBAIKAN ===
+                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest") # Pakai model cepat
+                            # === PERBAIKAN SELESAI ===
+                            
                             gemini_prompt = f"""
                             Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
                             Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
@@ -277,7 +289,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 hasil = "\n\n".join(promos)
 
                 try:
-                    model = genai.GenerativeModel("models/gemini-1.5-flash-latest")
+                    # === PERBAIKAN ===
+                    model = genai.GenerativeModel("models/gemini-flash-latest")
+                    # === PERBAIKAN SELESAI ===
+                    
                     # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
                     instr = (
                         "Kamu adalah Kozy, asisten internal kasir AZKO. "
