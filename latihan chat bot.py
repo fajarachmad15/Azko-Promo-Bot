@@ -4,7 +4,6 @@ import streamlit as st
 import gspread
 import pandas as pd
 import google.generativeai as genai
-import random
 
 # --- KONFIGURASI API DAN SHEETS ---
 API_KEY = (
@@ -42,15 +41,15 @@ except Exception as e:
     st.stop()
 
 # --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Kozy - Asisten Promo AZKO", page_icon="🛍️", layout="centered")
+st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
 
 # --- HEADER UTAMA ---
 st.markdown(
     """
     <div style='text-align: center; margin-bottom: 1rem;'>
-        <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Promo AZKO</h1>
+        <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Kasir AZKO</h1>
         <p style='color: gray; font-size: 0.9rem;'>supported by <b>Gemini AI</b></p>
-        <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Periksa informasi penting sebelum digunakan.</p>
+        <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Selalu konfirmasi info penting.</p>
     </div>
     """,
     unsafe_allow_html=True
@@ -59,7 +58,7 @@ st.markdown(
 # --- STATE INISIALISASI ---
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hai! Aku Kozy, asisten promo AZKO. Lagi cari promo apa nih? 😉"}
+        {"role": "assistant", "content": "Halo! Aku Kozy, asisten promo internal AZKO. Ada info promo apa yang kamu butuh? 🧐"}
     ]
 if "context" not in st.session_state:
     st.session_state.context = ""
@@ -67,29 +66,56 @@ if "last_intent" not in st.session_state:
     st.session_state.last_intent = "greeting"
 
 # --- FUNGSI PENDUKUNG ---
-def random_comment():
-    return random.choice([
-        "Hehe, lumayan banget promonya 😄",
-        "Cocok nih buat yang suka hemat!",
-        "Wah, promo ini sering banget dicari orang juga!",
-        "Mantap, bisa dipakai tiap akhir pekan lho!"
-    ])
 
-def detect_intent(text: str) -> str:
+# 🛑 FUNGSI LAMA (regex) DIHAPUS: def detect_intent(text: str) -> str:
+# 🛑 FUNGSI LAMA DIHAPUS: def detect_topic_change(last_intent: str, new_text: str):
+# 🛑 FUNGSI LAMA DIHAPUS: def random_comment():
+
+# ✨ FUNGSI BARU: Deteksi intent menggunakan AI (Gemini)
+# Ini akan jauh lebih baik dalam menangani typo seperti "vucher" atau "voucer"
+@st.cache_data(ttl=3600) # Cache hasil agar tidak boros API
+def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
-    if re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text): return "greeting"
-    if re.search(r"\b(apa kabar|gimana kabar|lagi ngapain)\b", text): return "smalltalk"
-    if re.search(r"\b(terima kasih|makasih|thanks)\b", text): return "thanks"
-    if re.search(r"\b(dah|bye|sampai jumpa)\b", text): return "goodbye"
-    if re.search(r"\b(promo|diskon|potongan|harga|cashback|bank|voucher)\b", text): return "promo"
-    return "other"
+    
+    # 1. Handle sapaan umum non-AI agar cepat
+    simple_greetings = re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text)
+    simple_thanks = re.search(r"\b(terima kasih|makasih|thanks|tq)\b", text)
+    simple_goodbye = re.search(r"\b(dah|bye|sampai jumpa|exit)\b", text)
+    
+    if simple_greetings: return "greeting"
+    if simple_thanks: return "thanks"
+    if simple_goodbye: return "goodbye"
 
-def detect_topic_change(last_intent: str, new_text: str):
-    new_intent = detect_intent(new_text)
-    return (new_intent != last_intent), new_intent
+    # 2. Gunakan AI untuk membedakan "promo" dari "other" (basa-basi/di luar topik)
+    try:
+        model = genai.GenerativeModel("models/gemini-flash-latest")
+        prompt = f"""
+        Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
+        Pilih HANYA SATU dari kategori ini: [promo, smalltalk, other]
+        
+        - "promo": Semua pertanyaan tentang diskon, voucher, bank, metode pembayaran, cashback, dll. (TERMASUK TYPO seperti 'vucher', 'voucer', 'discon', dll).
+        - "smalltalk": Basa-basi (apa kabar, lagi apa, kamu siapa).
+        - "other": Pertanyaan di luar topik promo.
+        
+        User: "{text}"
+        Intent:
+        """
+        response = model.generate_content(prompt).text.strip().lower()
+        
+        # Membersihkan respons AI
+        if "promo" in response: return "promo"
+        if "smalltalk" in response: return "smallaltk"
+        if "other" in response: return "other"
+        
+        # Fallback jika AI menjawab aneh, anggap saja "promo"
+        return "promo"
+    except Exception:
+        # Failsafe jika API call gagal, anggap "promo"
+        return "promo"
 
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     model = genai.GenerativeModel("models/gemini-flash-latest")
+    # Prompt ini sudah bagus, akan menangani typo "vucher" menjadi "voucher"
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
         keywords = model.generate_content(prompt).text.lower().split(",")
@@ -113,24 +139,26 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # --- INPUT CHAT ---
-if prompt := st.chat_input("Ketik pesanmu di sini..."):
+if prompt := st.chat_input("Ketik info promo yang dicari..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    topic_changed, intent = detect_topic_change(st.session_state.last_intent, prompt)
+    # ✨ LOGIKA BARU: Panggil fungsi AI untuk deteksi intent
+    intent = detect_intent_ai(prompt)
+    topic_changed = (intent != st.session_state.last_intent)
+    
     if topic_changed:
         st.session_state.context = ""
     
     answer = ""
     
     # Jawaban default jika terjadi error
-    default_fallback_answer = "Duh, maaf, Kozy lagi agak bingung nih. Boleh diulang pertanyaannya?"
-    # Jawaban "tanya finrep" sesuai permintaan Anda
+    default_fallback_answer = "Duh, maaf, Kozy lagi agak error nih. Coba tanya lagi ya."
+    # Jawaban "tanya finrep" (nada disesuaikan untuk kasir)
     finrep_answer = (
-        "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih, kak. "
-        "Untuk lebih pastinya, boleh tolong ditanyakan langsung ke finance rep area kamu ya 😊"
+        "Hmm, aku cek di sistem, data untuk voucher/promo itu **belum ter-update** nih. "
+        "Info lebih pastinya, coba **kontak Finrep area kamu** ya, biar aman. 👍"
     )
-
 
     if intent == "greeting":
         greet = "Halo 👋"
@@ -138,25 +166,24 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
         elif "siang" in prompt: greet = "Selamat siang ☀️"
         elif "sore" in prompt: greet = "Selamat sore 🌇"
         elif "malam" in prompt: greet = "Selamat malam 🌙"
-        answer = f"{greet}! Aku Kozy, asisten promo dari AZKO. Mau aku bantu cari promo apa hari ini?"
+        answer = f"{greet}! Aku Kozy, asisten promo internal AZKO. Ada yang bisa dibantu?"
 
     elif intent == "smalltalk":
-        answer = "Aku baik nih 😄 Siap bantu kamu cari promo menarik!"
+        answer = "Aku Kozy, asisten AI kamu. Siap bantu cari info promo. Ada yang ditanyakan soal promo?"
 
     elif intent == "thanks":
-        answer = "Sama-sama! Mau aku bantu cari promo lain juga?"
+        answer = "Sama-sama! 👍 Lanjut cari info lain?"
 
     elif intent == "goodbye":
-        answer = "Sampai jumpa ya! Semoga harimu menyenangkan dan dapet promo terbaik 🛍️"
+        answer = "Oke, sampai nanti ya! Selamat bekerja. 🛍️"
 
     elif intent == "promo":
         try:
             matches = find_smart_matches(df, prompt)
 
             if matches.empty:
-                # === BLOK MODIFIKASI DIMULAI ===
-                # Promo tidak ada di database. Cek ke AI apakah ini voucher eksklusif toko lain (Indomart)
-                # atau hanya voucher yg belum terdata (Ultra).
+                # === BLOK MODIFIKASI (Indomart vs Ultra) - DARI PERMINTAAN SEBELUMNYA ===
+                # (Ini sudah benar, akan menangani kasus "vucher MAP" dan "voucer ultra")
                 
                 try:
                     # 1. Buat model AI khusus untuk pengecekan
@@ -178,20 +205,19 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
 
                     if "YA" in ai_check_response:
                         # KASUS 1: (Voucher Indomart) - AI yakin ini eksklusif.
-                        # Kita minta AI merumuskan jawabannya.
                         
                         explain_model = genai.GenerativeModel("models/gemini-flash-latest")
+                        # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
                         explain_prompt = f"""
-                        Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat.
-                        User baru saja bertanya soal '{prompt}'.
-                        Jelaskan dengan ramah dan singkat bahwa voucher/promo itu sepertinya spesifik untuk toko/platform lain dan tidak bisa digunakan di AZKO.
-                        Gunakan sapaan "kak".
-                        Contoh balasan: "Oh, untuk voucher Indomart, sepertinya itu hanya bisa dipakai di Indomart saja ya, kak."
+                        Kamu adalah Kozy, asisten internal untuk kasir AZKO. Nada bicaramu ramah tapi to-the-point.
+                        User (kasir) baru saja bertanya soal '{prompt}'.
+                        Jelaskan dengan singkat dan jelas bahwa voucher/promo itu EKSKLUSIF untuk toko/platform lain dan tidak bisa diterima di AZKO.
+                        Contoh balasan: "Oh, untuk voucher Indomart, itu khusus untuk di Indomart aja ya. Nggak berlaku di AZKO."
                         """
                         answer = explain_model.generate_content(explain_prompt).text
 
                     else:
-                        # KASUS 2: (Voucher Ultra) - AI tidak yakin / ini promo umum.
+                        # KASUS 2: (Voucher Ultra / Vucher MAP) - AI tidak yakin / ini promo umum.
                         # Beri jawaban "belum terdata, tanya finrep".
                         answer = finrep_answer
                 
@@ -216,22 +242,23 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
 
                 try:
                     model = genai.GenerativeModel("models/gemini-flash-latest")
+                    # ✨ PROMPT TONE DISESUAIKAN UNTUK KASIR
                     instr = (
-                        "Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat. "
-                        "Sampaikan hasil promo berikut dengan gaya natural seperti asisten pribadi."
+                        "Kamu adalah Kozy, asisten internal kasir AZKO. "
+                        "Sampaikan hasil promo ini dengan jelas dan ringkas. Pastikan kasir mudah mengerti."
                     )
                     resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                    answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
+                    # 🛑 Menghapus random_comment()
+                    answer = getattr(resp, "text", hasil) 
                 except Exception:
-                    answer = hasil + "\n\n" + random_comment()
+                    answer = hasil # 🛑 Menghapus random_comment()
         
         except Exception as e:
             st.error(f"Error saat proses promo: {e}")
             answer = default_fallback_answer
 
-
-    else:
-        answer = "Hmm, bisa dijelaskan sedikit lagi maksud kamu? Mau bahas promo atau hal lain?"
+    else: # Ini adalah intent "other"
+        answer = "Hmm, maaf, aku Kozy asisten promo. Untuk pertanyaan di luar info promo, aku belum bisa bantu. Ada info promo yang mau dicari?"
 
     # --- OUTPUT KE CHAT ---
     with st.chat_message("assistant"):
