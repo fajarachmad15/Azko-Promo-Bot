@@ -100,15 +100,13 @@ def detect_intent_ai(text: str) -> str:
     except Exception:
         return "promo"
 
-# ✨ FUNGSI BARU: Untuk cek apakah ini pertanyaan soal "voucher" (termasuk typo)
+# ✨ FUNGSI UNTUK CEK "VOUCHER"
 @st.cache_data(ttl=3600)
 def is_voucher_query(text: str) -> bool:
     text = text.lower().strip()
-    # Pengecekan cepat non-AI
     if re.search(r"\b(v(ou|u)c(h)?er|vocer)\b", text):
         return True
     
-    # Pengecekan AI untuk kasus yang lebih rumit
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
         prompt = f"""
@@ -119,20 +117,19 @@ def is_voucher_query(text: str) -> bool:
         Contoh:
         - User: "voucer ultra bisa?" -> YA
         - User: "promo bca" -> TIDAK
-        - User: "vucher map" -> YA
-        - User: "diskon bank mandiri" -> TIDAK
         """
         response = model.generate_content(prompt).text.strip().upper()
         return "YA" in response
     except Exception:
-        # Failsafe: jika AI gagal, cek manual lagi
         return bool(re.search(r"\b(v(ou|u)c(h)?er|vocer)\b", text))
 
-# ✨ FUNGSI BARU: Untuk Step 2 (Klarifikasi Gemini)
+# ✨ FUNGSI UNTUK STEP 2 (DIPERBARUI)
 @st.cache_data(ttl=3600)
 def get_voucher_clarity(text: str) -> str:
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
+        # --- PERUBAHAN DI SINI ---
+        # "Voucher Telkomsel" ditambahkan sebagai contoh TIDAK_BERLAKU
         prompt = f"""
         Kamu adalah sistem filter. User (kasir) bertanya soal '{text}', yang mana datanya tidak ada di database.
         Berdasarkan pengetahuan umum, apakah '{text}' ini adalah voucher yang PASTI EKSKLUSIF dan HANYA BERLAKU di toko lain (Contoh: 'Voucher Indomart', 'Voucher Alfamart', 'Voucher Telkomsel')?
@@ -212,13 +209,12 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
             matches = find_smart_matches(df, prompt)
 
             if matches.empty:
-                # === BLOK MODIFIKASI BARU (SESUAI LOGIKA 3 LANGKAH ANDA) ===
+                # === INI LOGIKA 3 LANGKAH ANDA ===
                 
-                # Cek dulu ini soal voucher atau bukan
                 is_voucher = is_voucher_query(prompt)
                 
                 if is_voucher:
-                    # --- INI LOGIKA 3 LANGKAH (VOUCHER) ---
+                    # --- LOGIKA 3 LANGKAH (VOUCHER) ---
                     
                     # 1. Narasi Cek Database
                     narasi_1 = f"Hmm, aku cek di databasku, info untuk **'{prompt}'** memang belum ter-update nih."
@@ -226,35 +222,26 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                     # 2. Narasi Tanya Gemini (Clarity)
                     clarity = get_voucher_clarity(prompt)
                     
-                    narasi_2 = "" # Dikosongkan dulu
+                    narasi_2 = "" 
                     if clarity == "TIDAK_BERLAKU":
                         narasi_2 = "Setelah aku cek silang, voucher itu sepertinya memang **khusus untuk di merchant lain** ya (tidak berlaku di AZKO)."
                     elif clarity == "TIDAK_DIKETAHUI":
-                        # (Kasus Ultra/MAP/Telkomsel yang tidak dikenal AI)
                         narasi_2 = "Aku coba cek silang ke sistem AI, tapi infonya juga **belum ada** di sana."
                     
                     # 3. Narasi Template Respon (Finrep)
                     narasi_3 = "Untuk kepastian 100%, boleh tolong **cek info terbaru dari Partnership/PNA** atau langsung **kontak Finrep Area kamu** ya. Biar aman. 👍"
                     
-                    # Gabungkan jawabannya
                     answer = f"{narasi_1}\n\n{narasi_2}\n\n{narasi_3}"
                     
                 else:
-                    # --- INI LOGIKA 2 LANGKAH (BUKAN VOUCHER) ---
-                    # Contoh: "promo bank UOB" (tidak ada di database)
+                    # --- LOGIKA 2 LANGKAH (BUKAN VOUCHER) ---
                     
-                    # 1. Narasi Cek Database
                     narasi_1 = f"Hmm, aku cek di sistem, data untuk promo **'{prompt}'** sepertinya **belum ter-update** nih."
-                    
-                    # 3. Narasi Template Respon (Finrep)
                     narasi_3 = "Info lebih pastinya, coba **kontak Finrep Area kamu** ya, biar aman. 👍"
-                    
                     answer = f"{narasi_1}\n\n{narasi_3}"
                 
-                # === BLOK MODIFIKASI SELESAI ===
-
             else:
-                # ✅ Jika ada promo yang cocok (LOGIKA LAMA ANDA, SUDAH BAGUS)
+                # ✅ Jika ada promo yang cocok
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
