@@ -311,4 +311,54 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
             else:
                 # ==========================================================
-                # === BLOK JIKA DATA DITEMUKAN (DIPERBARUI D
+                # === BLOK JIKA DATA DITEMUKAN (DIPERBARUI DENGAN AI) ===
+                # ==========================================================
+                promos = []
+                for _, r in matches.iterrows():
+                    promos.append(
+                        f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
+                        f"📅 Periode: {r.get('PERIODE','')}\n"
+                        f"📝 {r.get('SYARAT_UTAMA','')}\n"
+                        f"💰 {r.get('DETAIL_DISKON','')}\n"
+                        f"🏦 Bank: {r.get('BANK_PARTNER','')}"
+                    )
+                hasil = "\n\n".join(promos)
+                
+                # Kembalikan AI perangkum untuk jawaban 'tidak kaku'
+                try:
+                    with st.spinner("Merangkum info..."):
+                        model = genai.GenerativeModel("models/gemini-flash-latest")
+                        # Prompt AI untuk merangkum dengan persona
+                        instr = (
+                            "Kamu adalah Kozy, asisten internal kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point.\n"
+                            f"User baru saja bertanya: '{prompt}'\n"
+                            "Aku sudah menemukan data promo berikut dari database:\n\n"
+                            f"{hasil}\n\n"
+                            "Tugasmu: Berikan jawaban yang merangkum data ini. JANGAN berhalusinasi atau menambah info di luar data. Mulai dengan sapaan ramah.\n"
+                            "Contoh 1: 'Oke, nemu nih! Untuk cicilan, kita ada...'\n"
+                            "Contoh 2: 'Siap. Untuk promo BSI, infonya ini ya...'"
+                        )
+                        resp = model.generate_content(instr)
+                        answer = getattr(resp, "text", hasil) 
+                except Exception as e:
+                    st.error(f"AI summarizer Gagal: {e}")
+                    # Failsafe: kembali ke jawaban "kaku" jika AI gagal
+                    answer = "Oke, aku nemu info ini di database:\n\n" + hasil
+                # ==========================================================
+                # === AKHIR PERBAIKAN ===
+                # ==========================================================
+        
+        except Exception as e:
+            st.error(f"Error saat proses promo: {e}")
+            answer = default_fallback_answer
+
+    else: # Ini adalah intent "other"
+        answer = "Hmm, maaf, aku Kozy asisten promo. Untuk pertanyaan di luar info promo, aku belum bisa bantu. Ada info promo yang mau dicari?"
+
+    # --- OUTPUT KE CHAT ---
+    with st.chat_message("assistant"):
+        st.markdown(answer)
+
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
+    st.session_state.last_intent = intent
