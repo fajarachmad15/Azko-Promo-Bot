@@ -1,5 +1,5 @@
 streamlit
-google-generativeai
 gspread
 pandas
-google-auth
+google-generativeai
+google-auth-oauthlib
