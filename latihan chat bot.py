@@ -44,138 +44,113 @@ except Exception as e:
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Kozy - Asisten Promo AZKO", page_icon="🛍️", layout="centered")
 
-# --- HEADER UTAMA ---
-st.markdown(
-    """
-    <div style='text-align: center; margin-bottom: 1rem;'>
-        <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Promo AZKO</h1>
-        <p style='color: gray; font-size: 0.9rem;'>supported by <b>Gemini AI</b></p>
-        <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Periksa informasi penting sebelum digunakan.</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<div style='text-align: center; margin-bottom: 1rem;'>
+    <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Promo AZKO</h1>
+    <p style='color: gray; font-size: 0.9rem;'>Untuk internal cashier & finance rep</p>
+    <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Periksa info penting sebelum dipakai.</p>
+</div>
+""", unsafe_allow_html=True)
 
-# --- STATE INISIALISASI ---
+# --- STATE ---
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hai! Aku Kozy, asisten promo AZKO. Lagi cari promo apa nih? 😉"}
-    ]
-if "context" not in st.session_state:
-    st.session_state.context = ""
+    st.session_state.messages = [{"role": "assistant", "content": "Halo! Kozy di sini. Mau cek promo atau voucher apa hari ini? 😊"}]
 if "last_intent" not in st.session_state:
     st.session_state.last_intent = "greeting"
 
-# --- FUNGSI PENDUKUNG ---
-def random_comment():
-    return random.choice([
-        "Hehe, lumayan banget promonya 😄",
-        "Cocok nih buat yang suka hemat!",
-        "Wah, promo ini sering banget dicari orang juga!",
-        "Mantap, bisa dipakai tiap akhir pekan lho!"
-    ])
+STOPWORDS = {"di","ke","yang","dan","dari","untuk","ya","ini","itu","dong","nih"}
 
-def detect_intent(text: str) -> str:
-    text = text.lower().strip()
-    if re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text): return "greeting"
-    if re.search(r"\b(apa kabar|gimana kabar|lagi ngapain)\b", text): return "smalltalk"
+# --- FUNGSI ---
+def prepare_tokens(q):
+    q = q.lower()
+    return [t for t in re.findall(r"\w+", q) if t not in STOPWORDS]
+
+def count_column_matches(row, tokens):
+    cols = ['NAMA_PROMO','PERIODE','SYARAT_UTAMA','DETAIL_DISKON','BANK_PARTNER']
+    count = 0
+    for col in cols:
+        text = str(row.get(col, '')).lower()
+        if any(t in text for t in tokens):
+            count += 1
+    return count
+
+def count_keyword_matches(row, tokens):
+    all_text = " ".join(str(v).lower() for v in row.values())
+    return sum(1 for t in tokens if t in all_text)
+
+def find_smart_matches(df, query):
+    tokens = prepare_tokens(query)
+    results = []
+    for _, row in df.iterrows():
+        cm = count_column_matches(row, tokens)
+        km = count_keyword_matches(row, tokens)
+        if cm >= 2:
+            results.append((row, "high"))
+        elif km >= 2:
+            results.append((row, "medium"))
+    if results:
+        highs = [r for r, lvl in results if lvl == "high"]
+        meds = [r for r, lvl in results if lvl == "medium"]
+        return pd.DataFrame(highs or meds)
+    return pd.DataFrame()
+
+def detect_intent(text):
+    text = text.lower()
+    if re.search(r"\b(halo|hai|hi|hello|selamat (pagi|siang|sore|malam))\b", text): return "greeting"
     if re.search(r"\b(terima kasih|makasih|thanks)\b", text): return "thanks"
-    if re.search(r"\b(dah|bye|sampai jumpa)\b", text): return "goodbye"
-    if re.search(r"\b(promo|diskon|potongan|harga|cashback|bank|voucher)\b", text): return "promo"
-    return "other"
+    if re.search(r"\b(bye|dah|sampai jumpa)\b", text): return "goodbye"
+    return "promo"
 
-def detect_topic_change(last_intent: str, new_text: str):
-    new_intent = detect_intent(new_text)
-    return (new_intent != last_intent), new_intent
-
-def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    model = genai.GenerativeModel("models/gemini-flash-latest")
-    prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
-    try:
-        keywords = model.generate_content(prompt).text.lower().split(",")
-        keywords = [k.strip() for k in keywords if k.strip()]
-    except Exception:
-        keywords = [query.lower()]
-
-    mask = pd.Series([False] * len(df))
-    for kw in keywords:
-        for c in df.columns:
-            mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
-    return df[mask]
-
-# --- UI CHAT ---
+# --- UI ---
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# --- INPUT CHAT ---
-if prompt := st.chat_input("Ketik pesanmu di sini..."):
+if prompt := st.chat_input("Ketik pertanyaan di sini..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    topic_changed, intent = detect_topic_change(st.session_state.last_intent, prompt)
-    if topic_changed:
-        st.session_state.context = ""
-    
+    intent = detect_intent(prompt)
     answer = ""
 
     if intent == "greeting":
-        greet = "Halo 👋"
-        if "pagi" in prompt: greet = "Selamat pagi 🌞"
-        elif "siang" in prompt: greet = "Selamat siang ☀️"
-        elif "sore" in prompt: greet = "Selamat sore 🌇"
-        elif "malam" in prompt: greet = "Selamat malam 🌙"
-        answer = f"{greet}! Aku Kozy, asisten promo dari AZKO. Mau aku bantu cari promo apa hari ini?"
-
-    elif intent == "smalltalk":
-        answer = "Aku baik nih 😄 Siap bantu kamu cari promo menarik!"
-
+        answer = "Halo! Kozy bantu cek ya, kamu mau info promo atau aturan voucher tertentu?"
     elif intent == "thanks":
-        answer = "Sama-sama! Mau aku bantu cari promo lain juga?"
-
+        answer = "Siap, sama-sama! Kalau mau cek promo lain, langsung ketik aja ya."
     elif intent == "goodbye":
-        answer = "Sampai jumpa ya! Semoga harimu menyenangkan dan dapet promo terbaik 🛍️"
-
-    elif intent == "promo":
+        answer = "Sip, makasih udah pakai Kozy. Semoga shift-nya lancar! 👋"
+    else:
         matches = find_smart_matches(df, prompt)
-
         if matches.empty:
-            # ✅ Kalau tidak ada promo yang cocok
             answer = (
-                "Hmm, sepertinya promo atau voucher yang kamu maksud belum ada di data aku nih. "
-                "Untuk lebih pastinya, silakan tanya langsung ke finance rep area kamu ya 😊"
+                "Hmm, sepertinya promo atau voucher itu belum ada di data aku nih. "
+                "Biar nggak salah info, coba tanyakan langsung ke *finance rep area kamu* aja ya 😊"
             )
         else:
-            # ✅ Jika ada promo yang cocok
             promos = []
             for _, r in matches.iterrows():
                 promos.append(
-                    f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
+                    f"**{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
                     f"📅 Periode: {r.get('PERIODE','')}\n"
                     f"📝 {r.get('SYARAT_UTAMA','')}\n"
                     f"💰 {r.get('DETAIL_DISKON','')}\n"
                     f"🏦 Bank: {r.get('BANK_PARTNER','')}"
                 )
             hasil = "\n\n".join(promos)
-
+            model = genai.GenerativeModel("models/gemini-flash-latest")
+            instr = (
+                "Kamu adalah Kozy, asisten internal untuk cashier AZKO. "
+                "Gunakan bahasa kerja yang sopan tapi lugas. "
+                "Sampaikan hasil promo di bawah dengan jelas, hindari gaya promosi ke pelanggan."
+            )
             try:
-                model = genai.GenerativeModel("models/gemini-flash-latest")
-                instr = (
-                    "Kamu adalah Kozy, asisten promo AZKO yang ramah dan hangat. "
-                    "Sampaikan hasil promo berikut dengan gaya natural seperti asisten pribadi."
-                )
                 resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
-                answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
+                answer = getattr(resp, "text", hasil)
             except Exception:
-                answer = hasil + "\n\n" + random_comment()
+                answer = hasil
 
-    else:
-        answer = "Hmm, bisa dijelaskan sedikit lagi maksud kamu? Mau bahas promo atau hal lain?"
-
-    # --- OUTPUT KE CHAT ---
     with st.chat_message("assistant"):
         st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
     st.session_state.last_intent = intent
