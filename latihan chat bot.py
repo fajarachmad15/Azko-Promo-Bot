@@ -67,7 +67,7 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
-@st.cache_data(ttl=3600)
+# 🛑 @st.cache_data DIHAPUS UNTUK TESTING
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
     
@@ -100,8 +100,7 @@ def detect_intent_ai(text: str) -> str:
     except Exception:
         return "promo"
 
-# ✨ FUNGSI UNTUK CEK "VOUCHER"
-@st.cache_data(ttl=3600)
+# 🛑 @st.cache_data DIHAPUS UNTUK TESTING
 def is_voucher_query(text: str) -> bool:
     text = text.lower().strip()
     if re.search(r"\b(v(ou|u)c(h)?er|vocer)\b", text):
@@ -123,16 +122,14 @@ def is_voucher_query(text: str) -> bool:
     except Exception:
         return bool(re.search(r"\b(v(ou|u)c(h)?er|vocer)\b", text))
 
-# ✨ FUNGSI UNTUK STEP 2 (DIPERBARUI)
-@st.cache_data(ttl=3600)
+# 🛑 @st.cache_data DIHAPUS UNTUK TESTING
 def get_voucher_clarity(text: str) -> str:
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
-        # --- PERUBAHAN DI SINI ---
-        # "Voucher Telkomsel" ditambahkan sebagai contoh TIDAK_BERLAKU
+        # Prompt ini sengaja dibuat ketat
         prompt = f"""
         Kamu adalah sistem filter. User (kasir) bertanya soal '{text}', yang mana datanya tidak ada di database.
-        Berdasarkan pengetahuan umum, apakah '{text}' ini adalah voucher yang PASTI EKSKLUSIF dan HANYA BERLAKU di toko lain (Contoh: 'Voucher Indomart', 'Voucher Alfamart', 'Voucher Telkomsel')?
+        Berdasarkan pengetahuan umum, apakah '{text}' ini adalah voucher yang PASTI EKSKLUSIF dan HANYA BERLAKU di toko lain (Contoh: 'Voucher Indomart', 'Voucher Alfamart', 'Voucher Telkomsel', 'Voucher Top One')?
         
         Jawab HANYA dengan salah satu dari dua label ini:
         1. "TIDAK_BERLAKU" (jika kamu 100% yakin ini eksklusif toko lain)
