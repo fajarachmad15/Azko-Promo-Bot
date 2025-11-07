@@ -35,7 +35,8 @@ if not SHEET_KEY:
 
 try:
     sheet = gc.open_by_key(SHEET_KEY).worksheet("promo")
-    df = pd.DataFrame(sheet.get_all_records())
+    # Salin df untuk mencegah error cache
+    df_original = pd.DataFrame(sheet.get_all_records())
 except Exception as e:
     st.error(f"❌ Gagal memuat data Sheets. Error: {e}")
     st.stop()
@@ -102,40 +103,50 @@ def detect_intent_ai(text: str) -> str:
         return "promo"
 
 # ==========================================================
-# === FUNGSI PENCARIAN DIPERBAIKI (LOGIKA AND) ===
+# === FUNGSI PENCARIAN DIPERBAIKI (LOGIKA SKOR) ===
 # ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
+    # Selalu buat salinan untuk pengerjaan
+    df_scored = df.copy()
+    
     model = genai.GenerativeModel("models/gemini-flash-latest")
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
         keywords = model.generate_content(prompt).text.lower().split(",")
-        keywords = [k.strip() for k in keywords if k.strip()]
+        keywords = [k.strip() for k in keywords if k.strip() and k.strip() not in ["apa", "saja", "ya", "ngga", "gak", "dong", "biar", "bisa", "kalau", "yg"]]
     except Exception:
         # Fallback jika AI gagal: ambil semua kata unik
-        keywords = list(set(re.findall(r'\b\w{3,}\b', query.lower()))) # Ambil kata > 2 huruf
+        keywords = list(set(re.findall(r'\b\w{3,}\b', query.lower())))
 
     if not keywords:
         return pd.DataFrame(columns=df.columns) # Return empty if no keywords
 
-    # Mulai dengan mask SEMUA BENAR (untuk logika AND)
-    final_mask = pd.Series([True] * len(df))
+    # Buat kolom skor, inisialisasi dengan 0
+    df_scored['match_score'] = 0
 
     for kw in keywords:
         # Mask untuk keyword ini (awalnya SEMUA SALAH)
-        kw_mask = pd.Series([False] * len(df))
-        for c in df.columns:
+        kw_mask = pd.Series([False] * len(df_scored))
+        for c in df_scored.columns:
             # Cek apakah kolom adalah string
-            if pd.api.types.is_string_dtype(df[c]):
-                kw_mask |= df[c].str.lower().str.contains(kw, na=False)
+            if pd.api.types.is_string_dtype(df_scored[c]):
+                kw_mask |= df_scored[c].str.lower().str.contains(kw, na=False)
             else:
                 # Konversi non-string ke string untuk dicari
-                kw_mask |= df[c].astype(str).str.lower().str.contains(kw, na=False)
+                kw_mask |= df_scored[c].astype(str).str.lower().str.contains(kw, na=False)
         
-        # Gabungkan hasil keyword ini dengan mask final (logika AND)
-        # Ini memastikan baris HARUS mengandung SEMUA keywords
-        final_mask &= kw_mask
+        # Tambahkan 1 poin ke baris yang cocok dengan keyword ini
+        df_scored.loc[kw_mask, 'match_score'] += 1
     
-    return df[final_mask]
+    # Cari skor maksimum yang didapat
+    max_score = df_scored['match_score'].max()
+    
+    # Jika skor maksimum 0 (tidak ada yg cocok sama sekali), kembalikan kosong
+    if max_score == 0:
+        return pd.DataFrame(columns=df.columns)
+        
+    # Kembalikan semua baris yang punya skor = skor maksimum
+    return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
 # ==========================================================
 # === AKHIR PERBAIKAN ===
 # ==========================================================
@@ -189,12 +200,13 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # Panggil fungsi_find_smart_matches yang sudah diperbaiki
-            matches = find_smart_matches(df, prompt)
+            # Panggil fungsi find_smart_matches yang sudah diperbaiki
+            # Kita passing df_original yang bersih setiap kali
+            matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
                 # ==========================================================
-                # === BLOK JIKA DATA TIDAK DITEMUKAN (SEKARANG AKAN JALAN) ===
+                # === BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah) ===
                 # ==========================================================
                 
                 is_voucher_query = False
@@ -232,9 +244,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                             
                             Contoh jika user bertanya 'voucher MAP':
                             "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
-                            
-                            Contoh jika user bertanya 'voucher Ultra Jaya':
-                            "Setelah aku klarifikasi lebih lanjut, voucher produk Ultra Jaya itu biasanya bisa dipakai di banyak supermarket yang bekerja sama."
                             """
                             gemini_response = gemini_model.generate_content(gemini_prompt)
                             step_2_gemini = gemini_response.text.strip()
@@ -263,7 +272,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 # ==========================================================
 
             else:
-                # ✅ Jika ada promo yang cocok (misal: "Voucher Kawan Lama")
+                # ✅ Jika ada promo yang cocok (logika skor berhasil)
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
