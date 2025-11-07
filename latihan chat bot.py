@@ -43,7 +43,18 @@ except Exception as e:
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Kozy - Asisten Promo AZKO", page_icon="🛍️", layout="centered")
-st.title("🛍️ Kozy – Asisten Promo AZKO")
+
+# --- HEADER UTAMA ---
+st.markdown(
+    """
+    <div style='text-align: center; margin-bottom: 1rem;'>
+        <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Promo AZKO</h1>
+        <p style='color: gray; font-size: 0.9rem;'>supported by <b>Gemini AI</b></p>
+        <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Periksa informasi penting sebelum digunakan.</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # --- STATE INISIALISASI ---
 if "messages" not in st.session_state:
@@ -75,13 +86,10 @@ def detect_intent(text: str) -> str:
 
 def detect_topic_change(last_intent: str, new_text: str):
     new_intent = detect_intent(new_text)
-    # Kalau intent baru beda dari sebelumnya, berarti ganti topik
-    if new_intent != last_intent:
-        return True, new_intent
-    return False, new_intent
+    return (new_intent != last_intent), new_intent
 
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("models/gemini-flash-latest")
     prompt = f"Tentukan 3 kata kunci utama dari pertanyaan berikut untuk mencari promo: '{query}'. Balas hanya kata kunci dipisahkan koma."
     try:
         keywords = model.generate_content(prompt).text.lower().split(",")
@@ -106,8 +114,6 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     topic_changed, intent = detect_topic_change(st.session_state.last_intent, prompt)
-
-    # --- Reset konteks kalau ganti topik ---
     if topic_changed:
         st.session_state.context = ""
     
@@ -133,7 +139,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
     elif intent == "promo":
         matches = find_smart_matches(df, prompt)
         if matches.empty:
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("models/gemini-flash-latest")
             instr = (
                 "Kamu adalah Kozy, asisten promo AZKO yang ramah. "
                 "Jika user menanyakan promo yang tidak ada, jawab sopan dan arahkan ke finance rep."
@@ -155,7 +161,7 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
                 )
             hasil = "\n\n".join(promos)
             try:
-                model = genai.GenerativeModel("gemini-2.5-flash")
+                model = genai.GenerativeModel("models/gemini-flash-latest")
                 instr = "Sampaikan hasil promo berikut dengan gaya hangat dan natural seperti asisten pribadi."
                 resp = model.generate_content(instr + "\n\n" + hasil + "\n\nUser: " + prompt)
                 answer = getattr(resp, "text", hasil + "\n\n" + random_comment())
@@ -163,14 +169,11 @@ if prompt := st.chat_input("Ketik pesanmu di sini..."):
                 answer = hasil + "\n\n" + random_comment()
 
     else:
-        # fallback kalau konteks gak dikenali
         answer = "Hmm, bisa dijelaskan sedikit lagi maksud kamu? Mau bahas promo atau hal lain?"
 
-    # --- Tampilkan jawaban ---
     with st.chat_message("assistant"):
         st.markdown(answer)
 
-    # --- Simpan state ---
     st.session_state.messages.append({"role": "assistant", "content": answer})
     st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
     st.session_state.last_intent = intent
