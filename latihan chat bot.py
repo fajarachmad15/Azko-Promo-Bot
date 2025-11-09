@@ -56,24 +56,20 @@ st.markdown(
         padding-left: 1rem;
         padding-right: 1rem;
     }
-
     /* 2. Mengubah warna Primary Streamlit (Warna Merah AZKO: #BF1E2D) */
     :root {
         --primary-color: #BF1E2D; 
     }
-
     /* 3. Mengubah Header dan Font */
     h1, h2, h3, h4, .stApp {
         font-family: 'Poppins', sans-serif; /* Ganti font agar lebih modern */
     }
-
     /* 4. Mengubah warna ikon dan tombol KIRIM menjadi Merah AZKO */
     .stButton > button, .stTextInput > div > div > button {
         background-color: var(--primary-color) !important;
         color: white !important;
         border: none;
     }
-
     /* 5. Mengubah warna notifikasi Peringatan (Warning) menjadi Kuning/Oranye */
     .stAlert.stWarning {
         background-color: #FFA50040; /* Oranye muda transparan */
@@ -83,7 +79,6 @@ st.markdown(
     .stAlert.stWarning p {
         color: white; /* Agar teks di mode gelap tetap terbaca */
     }
-
     /* 6. Mempercantik Chat Input */
     .stTextInput {
         border-radius: 0.75rem;
@@ -92,7 +87,6 @@ st.markdown(
         border-radius: 0.75rem;
         border: 1px solid #BF1E2D; /* Border merah di input */
     }
-    
     /* 7. Memperjelas pemisah/garis */
     hr {
         border-top: 1px solid #BF1E2D40; /* Merah transparan */
@@ -165,7 +159,7 @@ def detect_intent_ai(text: str) -> str:
         if "other" in response: return "other"
         
         if "promo" in text: return "promo"
-        return "smalltalk" # Perbaikan typo dari 'smallalk'
+        return "smalltalk"
     except Exception:
         if "promo" in text: return "promo"
         return "smalltalk"
@@ -182,7 +176,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai"
+        "digunakan", "dipakai", "berarti" # Perbaikan: 'kartu' dan 'kredit' dihapus dari stopword
     ])
     
     # 1. Ambil semua kata dari query (minimal 3 huruf)
@@ -251,10 +245,8 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
-    not_found_non_voucher_answer = (
-        f"Hmm, aku cek di database Kozy, info soal itu **belum ter-update** nih. "
-        f"{finrep_template_answer}"
-    )
+    # Template "not_found_non_voucher_answer" tidak lagi diperlukan,
+    # karena kita akan membuat satu jawaban terpadu di bawah.
     # --- AKHIR TEMPLATE ---
 
     if intent == "greeting":
@@ -273,14 +265,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 Kamu adalah Kozy, asisten kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point (seperti teman kerja).
                 User baru saja bilang: "{prompt}"
                 Beri respon smalltalk yang sesuai. JANGAN mencari promo.
-                
-                Contoh 1:
-                User: bener kamu bisa jawab seputar promo?
-                Kamu: Bener dong, coba aja siapa takut! 😉 Ada promo apa yang kamu cari?
-                
-                Contoh 2:
-                User: kamu siapa?
-                Kamu: Aku Kozy, asisten promo kamu. Siap bantu!
                 """
                 answer = model.generate_content(prompt_smalltalk).text.strip()
         except Exception:
@@ -296,65 +280,28 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         try:
             matches = find_smart_matches(df_original, prompt)
 
+            # ==========================================================
+            # === BLOK 'TIDAK DITEMUKAN' (LOGIKA BARU 1&3) ===
+            # ==========================================================
             if matches.empty:
-                # --- BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah) ---
-                is_voucher_query = False
-                try:
-                    with st.spinner("Menganalisis pertanyaan..."):
-                        check_model = genai.GenerativeModel("models/gemini-flash-latest")
-                        check_prompt = f"""
-                        Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
-                        User: "{prompt}"
-                        Jawab HANYA 'YA' atau 'TIDAK'.
-                        """
-                        check_response = check_model.generate_content(check_prompt).text.strip().upper()
-                        if "YA" in check_response:
-                            is_voucher_query = True
-                except Exception as e:
-                    st.warning(f"AI voucher check failed: {e}. Menggunakan cek manual.")
-                    prompt_lower = prompt.lower()
-                    if "voucher" in prompt_lower or "vucher" in prompt_lower or "voucer" in prompt_lower or "vocer" in prompt_lower:
-                        is_voucher_query = True
-
-                if is_voucher_query:
-                    # --- ALUR 3 LANGKAH (KHUSUS VOUCHER) ---
-                    try:
-                        step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
-                        
-                        step_2_gemini = ""
-                        with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
-                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
-                            gemini_prompt = f"""
-                            Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
-                            Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
-                            Fokus pada apakah ini voucher umum atau spesifik untuk toko/grup tertentu.
-                            
-                            Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
-                            
-                            Contoh jika user bertanya 'voucher MAP':
-                            "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
-                            """
-                            gemini_response = gemini_model.generate_content(gemini_prompt)
-                            step_2_gemini = gemini_response.text.strip()
-
-                        answer = (
-                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
-                            f"1. {step_1_db}\n\n"
-                            f"2. {step_2_gemini}\n\n"
-                            f"3. {finrep_template_answer}"
-                        )
-
-                    except Exception as e:
-                        st.error(f"AI Gemini check (langkah 2) gagal: {e}")
-                        answer = (
-                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
-                            f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
-                            f"2. {finrep_template_answer}"
-                        )
+                # Sesuai permintaan, semua respons "tidak ditemukan" (voucher atau non-voucher)
+                # kini menggunakan alur 1&3 yang disederhanakan.
                 
-                else:
-                    # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
-                    answer = not_found_non_voucher_answer
+                # Langkah 1: Cek database (narasi)
+                step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' belum terdaftar** nih."
+                
+                # Langkah 3: Template Finrep
+                step_3_finrep = finrep_template_answer
+                
+                # Gabungkan (ganti nomor 3 jadi 2)
+                answer = (
+                    f"Oke, aku bantu cek ya:\n\n"
+                    f"1. {step_1_db}\n\n"
+                    f"2. {step_3_finrep}"
+                )
+            # ==========================================================
+            # === AKHIR BLOK 'TIDAK DITEMUKAN' ===
+            # ==========================================================
 
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
@@ -378,8 +325,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                             "Aku sudah menemukan data promo berikut dari database:\n\n"
                             f"{hasil}\n\n"
                             "Tugasmu: Berikan jawaban yang merangkum data ini. JANGAN berhalusinasi atau menambah info di luar data. Mulai dengan sapaan ramah.\n"
-                            "Contoh 1: 'Oke, nemu nih! Untuk cicilan, kita ada...'\n"
-                            "Contoh 2: 'Siap. Ini dia info untuk voucher yang kamu cari...'"
                         )
                         resp = model.generate_content(instr)
                         answer = getattr(resp, "text", hasil) 
