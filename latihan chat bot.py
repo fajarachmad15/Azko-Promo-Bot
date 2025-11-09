@@ -127,6 +127,41 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
+# ==========================================================
+# === FUNGSI BARU: AI PEMBERSIH TYPO ===
+# ==========================================================
+@st.cache_data(ttl=3600) # Cache hasil pembersihan
+def clean_prompt_with_ai(text: str) -> str:
+    """Menggunakan AI untuk memperbaiki typo sebelum diproses."""
+    try:
+        model = genai.GenerativeModel("models/gemini-flash-latest")
+        prompt_template = f"""
+        Kamu adalah ahli ejaan Bahasa Indonesia, perbaiki typo di teks ini.
+        Balas HANYA dengan teks yang sudah diperbaiki.
+        Contoh:
+        User: vocer map
+        Kamu: voucher map
+        User: cicilan tnpa krtu krdt
+        Kamu: cicilan tanpa kartu kredit
+        User: bca kartu debitnya ngga bisa tuker point ya?
+        Kamu: bca kartu debitnya ngga bisa tukar poin ya?
+        
+        Teks: "{text}"
+        Perbaikan:
+        """
+        response = model.generate_content(prompt_template)
+        cleaned_text = response.text.strip()
+        if not cleaned_text: # Failsafe jika AI balikin kosong
+            return text
+        return cleaned_text
+    except Exception as e:
+        st.warning(f"AI Typo Cleaner Gagal: {e}. Menggunakan teks asli.")
+        return text # Jika AI gagal, gunakan teks asli
+# ==========================================================
+# === AKHIR FUNGSI BARU ===
+# ==========================================================
+
+
 @st.cache_data(ttl=3600)
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
@@ -164,25 +199,18 @@ def detect_intent_ai(text: str) -> str:
         if "promo" in text: return "promo"
         return "smalltalk"
 
-# ==========================================================
-# === FUNGSI PENCARIAN STABIL (Skor Relevan) ===
-# ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     df_scored = df.copy()
     
-    # Daftar kata-kata umum (stop words) untuk diabaikan
     STOP_WORDS = set([
         "ada", "apa", "aja", "bisa", "buat", "biar", "cara", "cek", "coba",
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai", "berarti" # Perbaikan: 'kartu' dan 'kredit' dihapus dari stopword
+        "digunakan", "dipakai", "berarti"
     ])
     
-    # 1. Ambil semua kata dari query (minimal 3 huruf)
     words = re.findall(r'\b\w{3,}\b', query.lower())
-    
-    # 2. Saring kata-kata, buang stop words
     keywords = [word for word in words if word not in STOP_WORDS]
 
     if not keywords:
@@ -191,7 +219,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
             keywords = words
 
     if not keywords:
-        return pd.DataFrame(columns=df.columns) # Return empty
+        return pd.DataFrame(columns=df.columns) 
 
     df_scored['match_score'] = 0
 
@@ -210,15 +238,11 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # ATURAN KETAT: Jika kueri spesifik (>1 kata kunci) tapi skornya cuma 1 (kecocokan lemah), anggap tidak relevan.
-    if len(keywords) > 1 and max_score == 1:
+    # ATURAN KETAT: Jika skor tidak sempurna, anggap tidak relevan.
+    if max_score < len(keywords):
         return pd.DataFrame(columns=df.columns)
         
-    # Kembalikan baris dengan skor tertinggi
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
-# ==========================================================
-# === AKHIR FUNGSI PENCARIAN ===
-# ==========================================================
 
 
 # --- UI CHAT ---
@@ -231,7 +255,19 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    intent = detect_intent_ai(prompt)
+    # ==========================================================
+    # === PERUBAHAN: LANGKAH 0 - PEMBERSIHAN TYPO ===
+    # ==========================================================
+    # Simpan prompt asli untuk ditampilkan
+    original_prompt = prompt 
+    
+    # Lakukan pembersihan typo
+    with st.spinner("Memproses..."):
+        cleaned_prompt = clean_prompt_with_ai(original_prompt)
+    # ==========================================================
+
+    # Gunakan 'cleaned_prompt' untuk semua logika internal
+    intent = detect_intent_ai(cleaned_prompt)
     topic_changed = (intent != st.session_state.last_intent)
     
     if topic_changed:
@@ -245,8 +281,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
-    # Template "not_found_non_voucher_answer" tidak lagi diperlukan,
-    # karena kita akan membuat satu jawaban terpadu di bawah.
     # --- AKHIR TEMPLATE ---
 
     if intent == "greeting":
@@ -261,9 +295,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         try:
             with st.spinner("..."):
                 model = genai.GenerativeModel("models/gemini-flash-latest")
+                # Gunakan cleaned_prompt untuk smalltalk
                 prompt_smalltalk = f"""
                 Kamu adalah Kozy, asisten kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point (seperti teman kerja).
-                User baru saja bilang: "{prompt}"
+                User baru saja bilang: "{cleaned_prompt}"
                 Beri respon smalltalk yang sesuai. JANGAN mencari promo.
                 """
                 answer = model.generate_content(prompt_smalltalk).text.strip()
@@ -278,30 +313,21 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            matches = find_smart_matches(df_original, prompt)
+            # Gunakan cleaned_prompt untuk mencari
+            matches = find_smart_matches(df_original, cleaned_prompt)
 
-            # ==========================================================
-            # === BLOK 'TIDAK DITEMUKAN' (LOGIKA BARU 1&3) ===
-            # ==========================================================
             if matches.empty:
-                # Sesuai permintaan, semua respons "tidak ditemukan" (voucher atau non-voucher)
-                # kini menggunakan alur 1&3 yang disederhanakan.
+                # --- BLOK 'TIDAK DITEMUKAN' (LOGIKA 1&3) ---
                 
-                # Langkah 1: Cek database (narasi)
-                step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' belum terdaftar** nih."
-                
-                # Langkah 3: Template Finrep
+                # Gunakan cleaned_prompt untuk narasi
+                step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{cleaned_prompt}' belum terdaftar** nih."
                 step_3_finrep = finrep_template_answer
                 
-                # Gabungkan (ganti nomor 3 jadi 2)
                 answer = (
                     f"Oke, aku bantu cek ya:\n\n"
                     f"1. {step_1_db}\n\n"
                     f"2. {step_3_finrep}"
                 )
-            # ==========================================================
-            # === AKHIR BLOK 'TIDAK DITEMUKAN' ===
-            # ==========================================================
 
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
@@ -309,7 +335,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 for _, r in matches.iterrows():
                     promos.append(
                         f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                        f"📅 Periode: {r.get('PERIODE','')}\n"
+                        f"📅 Periode: {r.get('PERIO','')}\n" # Typo di kode lama? Seharusnya PERIODE
                         f"📝 {r.get('SYARAT_UTAMA','')}\n"
                         f"💰 {r.get('DETAIL_DISKON','')}\n"
                         f"🏦 Bank: {r.get('BANK_PARTNER','')}"
@@ -319,9 +345,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 try:
                     with st.spinner("Merangkum info..."):
                         model = genai.GenerativeModel("models/gemini-flash-latest")
+                        # Gunakan cleaned_prompt untuk konteks
                         instr = (
                             "Kamu adalah Kozy, asisten internal kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point.\n"
-                            f"User baru saja bertanya: '{prompt}'\n"
+                            f"User baru saja bertanya (setelah perbaikan typo): '{cleaned_prompt}'\n"
                             "Aku sudah menemukan data promo berikut dari database:\n\n"
                             f"{hasil}\n\n"
                             "Tugasmu: Berikan jawaban yang merangkum data ini. JANGAN berhalusinasi atau menambah info di luar data. Mulai dengan sapaan ramah.\n"
@@ -344,5 +371,5 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
+    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n" # Simpan prompt asli di konteks
     st.session_state.last_intent = intent
