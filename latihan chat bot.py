@@ -165,7 +165,7 @@ def detect_intent_ai(text: str) -> str:
         if "other" in response: return "other"
         
         if "promo" in text: return "promo"
-        return "smalltalk" # Perbaikan typo dari 'smallalk'
+        return "smalltalk" 
     except Exception:
         if "promo" in text: return "promo"
         return "smalltalk"
@@ -182,7 +182,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai"
+        "digunakan", "dipakai", "berarti" # <-- 'berarti' ditambahkan
     ])
     
     # 1. Ambil semua kata dari query (minimal 3 huruf)
@@ -216,11 +216,25 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # ATURAN KETAT: Jika kueri spesifik (>1 kata kunci) tapi skornya cuma 1 (kecocokan lemah), anggap tidak relevan.
-    if len(keywords) > 1 and max_score == 1:
-        return pd.DataFrame(columns=df.columns)
+    # ==========================================================
+    # === PERUBAHAN LOGIKA INTI ADA DI SINI ===
+    # ==========================================================
+    #
+    # ATURAN KETAT BARU:
+    # Skor tertinggi (max_score) HARUS SAMA DENGAN jumlah kata kunci.
+    # Ini memaksa kueri seperti "cicilan TANPA kartu kredit" (4 keywords)
+    # untuk GAGAL jika hanya cocok 3 ("cicilan", "kartu", "kredit")
+    # dan tidak menemukan kata "tanpa".
+    
+    if max_score < len(keywords):
+        return pd.DataFrame(columns=df.columns) # Kembalikan nol jika tidak semua keyword cocok
+    
+    # Aturan lama yang lemah (dihapus/diganti)
+    # if len(keywords) > 1 and max_score == 1:
+    #     return pd.DataFrame(columns=df.columns)
+    # ==========================================================
         
-    # Kembalikan baris dengan skor tertinggi
+    # Kembalikan baris dengan skor tertinggi (yang skornya = len(keywords))
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
 # ==========================================================
 # === AKHIR FUNGSI PENCARIAN ===
@@ -251,7 +265,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
-    # Variabel not_found_non_voucher_answer dihapus karena sudah tidak dipakai.
     # --- AKHIR TEMPLATE ---
 
     if intent == "greeting":
@@ -291,14 +304,14 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
+            # Fungsi pencarian yang LEBIH KETAT sekarang dijalankan
             matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
                 # ==========================================================
-                # === BLOK JIKA DATA TIDAK DITEMUKAN (LOGIKA BARU) ===
+                # === BLOK JIKA DATA TIDAK DITEMUKAN (LOGIKA 3-LANGKAH) ===
                 # ==========================================================
-                # Alur 3 langkah ini sekarang berlaku untuk SEMUA kueri (voucher, cicilan, dll)
-                # yang tidak ditemukan di database, sesuai permintaan Anda.
+                # Kueri "cicilan tanpa kartu kredit" sekarang akan masuk ke sini
                 
                 try:
                     # LANGKAH 1: Info dari Database (Selalu 'tidak ada')
@@ -309,7 +322,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                     with st.spinner(f"Mencari info publik soal '{prompt}'..."):
                         gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
                         
-                        # Prompt ini diperbarui agar bisa menangani voucher, cicilan, atau lainnya
                         gemini_prompt = f"""
                         Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
                         Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
@@ -351,12 +363,14 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
+                # Hanya akan masuk ke sini jika SEMUA kata kunci cocok
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
                         f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
                         f"📅 Periode: {r.get('PERIODE','')}\n"
                         f"📝 {r.get('SYARAT_UTAMA','')}\n"
+        
                         f"💰 {r.get('DETAIL_DISKON','')}\n"
                         f"🏦 Bank: {r.get('BANK_PARTNER','')}"
                     )
