@@ -137,7 +137,8 @@ if "last_intent" not in st.session_state:
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
     
-    simple_greetings = re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam))\b", text)
+    # === PERBAIKAN 1: Menambahkan sapaan Inggris ke regex ===
+    simple_greetings = re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam)|morning|afternoon|evening)\b", text)
     simple_thanks = re.search(r"\b(terima kasih|makasih|thanks|tq)\b", text)
     simple_goodbye = re.search(r"\b(dah|bye|sampai jumpa|exit)\b", text)
     
@@ -147,12 +148,14 @@ def detect_intent_ai(text: str) -> str:
 
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
+        
+        # === PERBAIKAN 2: Menambahkan contoh "redeem point" ke prompt AI ===
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
         Pilih HANYA SATU dari kategori ini: [promo_search, smalltalk, other]
         
-        - "promo_search": User MENCARI info promo spesifik. (Contoh: "ada promo apa", "cicilan BCA", "voucher MAP", "diskon BSI").
-        - "smalltalk": Basa-basi ATAU pertanyaan TENTANG kamu (si bot). (Contoh: "apa kabar", "kamu siapa", "bener kamu bisa jawab?", "lagi apa").
+        - "promo_search": User MENCARI info promo spesifik. (Contoh: "ada promo apa", "cicilan BCA", "voucher MAP", "diskon BSI", "tukar poin", "redeem point").
+        - "smalltalk": Basa-basi ATAU pertanyaan TENTANG kamu (si bot). (Contoh: "apa kabar", "kamu siapa", "bener kamu bisa jawab?", "lagi apa", "morning").
         - "other": Pertanyaan di luar topik.
         
         User: "{text}"
@@ -164,10 +167,14 @@ def detect_intent_ai(text: str) -> str:
         if "smalltalk" in response: return "smalltalk"
         if "other" in response: return "other"
         
-        if "promo" in text: return "promo"
+        # Fallback jika AI bingung
+        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text:
+            return "promo"
         return "smalltalk" 
     except Exception:
-        if "promo" in text: return "promo"
+        # Fallback jika AI error
+        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text:
+            return "promo"
         return "smalltalk"
 
 # ==========================================================
@@ -182,7 +189,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai", "berarti" # <-- 'berarti' ditambahkan
+        "digunakan", "dipakai", "berarti"
     ])
     
     # 1. Ambil semua kata dari query (minimal 3 huruf)
@@ -192,7 +199,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     keywords = [word for word in words if word not in STOP_WORDS]
 
     if not keywords:
-        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan"]]
+        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan", "poin", "redeem"]]
         if not keywords:
             keywords = words
 
@@ -216,23 +223,10 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # ==========================================================
-    # === PERUBAHAN LOGIKA INTI ADA DI SINI ===
-    # ==========================================================
-    #
     # ATURAN KETAT BARU:
     # Skor tertinggi (max_score) HARUS SAMA DENGAN jumlah kata kunci.
-    # Ini memaksa kueri seperti "cicilan TANPA kartu kredit" (4 keywords)
-    # untuk GAGAL jika hanya cocok 3 ("cicilan", "kartu", "kredit")
-    # dan tidak menemukan kata "tanpa".
-    
     if max_score < len(keywords):
         return pd.DataFrame(columns=df.columns) # Kembalikan nol jika tidak semua keyword cocok
-    
-    # Aturan lama yang lemah (dihapus/diganti)
-    # if len(keywords) > 1 and max_score == 1:
-    #     return pd.DataFrame(columns=df.columns)
-    # ==========================================================
         
     # Kembalikan baris dengan skor tertinggi (yang skornya = len(keywords))
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
@@ -269,10 +263,11 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     if intent == "greeting":
         greet = "Halo 👋"
-        if "pagi" in prompt: greet = "Selamat pagi 🌞"
-        elif "siang" in prompt: greet = "Selamat siang ☀️"
-        elif "sore" in prompt: greet = "Selamat sore 🌇"
-        elif "malam" in prompt: greet = "Selamat malam 🌙"
+        prompt_lower = prompt.lower()
+        if "pagi" in prompt_lower or "morning" in prompt_lower: greet = "Selamat pagi 🌞"
+        elif "siang" in prompt_lower or "afternoon" in prompt_lower: greet = "Selamat siang ☀️"
+        elif "sore" in prompt_lower or "evening" in prompt_lower: greet = "Selamat sore 🌇"
+        elif "malam" in prompt_lower: greet = "Selamat malam 🌙"
         answer = f"{greet}! Aku Kozy, asisten promo internal AZKO. Ada yang bisa dibantu?"
 
     elif intent == "smalltalk":
@@ -311,7 +306,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 # ==========================================================
                 # === BLOK JIKA DATA TIDAK DITEMUKAN (LOGIKA 3-LANGKAH) ===
                 # ==========================================================
-                # Kueri "cicilan tanpa kartu kredit" sekarang akan masuk ke sini
                 
                 try:
                     # LANGKAH 1: Info dari Database (Selalu 'tidak ada')
@@ -370,7 +364,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
                         f"📅 Periode: {r.get('PERIODE','')}\n"
                         f"📝 {r.get('SYARAT_UTAMA','')}\n"
-        
                         f"💰 {r.get('DETAIL_DISKON','')}\n"
                         f"🏦 Bank: {r.get('BANK_PARTNER','')}"
                     )
