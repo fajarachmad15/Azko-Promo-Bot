@@ -44,17 +44,82 @@ except Exception as e:
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
 
-# --- HEADER UTAMA ---
+# ==========================================================
+# === CSS KUSTOM (UNIK AZKO) ===
+# ==========================================================
 st.markdown(
     """
-    <div style='text-align: center; margin-bottom: 1rem;'>
-        <h1 style='margin-bottom: 0;'>🛍️ Kozy – Asisten Kasir AZKO</h1>
-        <p style='color: gray; font-size: 0.9rem;'>supported by <b>Gemini AI</b></p>
+    <style>
+    /* 1. Mengatur lebar container utama */
+    .css-1d391kg {
+        max-width: 700px; /* Lebar lebih nyaman untuk chat */
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+
+    /* 2. Mengubah warna Primary Streamlit (Warna Merah AZKO: #BF1E2D) */
+    :root {
+        --primary-color: #BF1E2D; 
+    }
+
+    /* 3. Mengubah Header dan Font */
+    h1, h2, h3, h4, .stApp {
+        font-family: 'Poppins', sans-serif; /* Ganti font agar lebih modern */
+    }
+
+    /* 4. Mengubah warna ikon dan tombol KIRIM menjadi Merah AZKO */
+    .stButton > button, .stTextInput > div > div > button {
+        background-color: var(--primary-color) !important;
+        color: white !important;
+        border: none;
+    }
+
+    /* 5. Mengubah warna notifikasi Peringatan (Warning) menjadi Kuning/Oranye */
+    .stAlert.stWarning {
+        background-color: #FFA50040; /* Oranye muda transparan */
+        border-left: 5px solid #FFC300; /* Oranye gelap */
+        color: #FFC300;
+    }
+    .stAlert.stWarning p {
+        color: white; /* Agar teks di mode gelap tetap terbaca */
+    }
+
+    /* 6. Mempercantik Chat Input */
+    .stTextInput {
+        border-radius: 0.75rem;
+    }
+    .stTextInput > div > div > input {
+        border-radius: 0.75rem;
+        border: 1px solid #BF1E2D; /* Border merah di input */
+    }
+    
+    /* 7. Memperjelas pemisah/garis */
+    hr {
+        border-top: 1px solid #BF1E2D40; /* Merah transparan */
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+# --- HEADER APLIKASI (DISESUAIKAN DENGAN LOGO) ---
+st.markdown(
+    f"""
+    <div style='text-align: center; margin-bottom: 0.5rem;'>
+        <img src="https://raw.githubusercontent.com/fajarachmad15/Azko-Promo-Bot/main/azko-logo-white-on-red.png" alt="AZKO Logo" style="width: 50px; margin-bottom: 0.5rem;">
+        <h1 style='margin-bottom: 0.2rem; font-size: 2.2rem;'>Kozy – Asisten Kasir AZKO</h1>
+        <p style='color: gray; font-size: 0.8rem;'>supported by <b>Gemini AI</b></p>
         <p style='color: #d9534f; font-size: 0.8rem;'>⚠️ Kozy dapat membuat kesalahan. Selalu konfirmasi info penting.</p>
     </div>
     """,
     unsafe_allow_html=True
 )
+
+st.markdown("---") # Garis pemisah visual
+# ==========================================================
+# === AKHIR CSS DAN HEADER ===
+# ==========================================================
+
 
 # --- STATE INISIALISASI ---
 if "messages" not in st.session_state:
@@ -100,13 +165,13 @@ def detect_intent_ai(text: str) -> str:
         if "other" in response: return "other"
         
         if "promo" in text: return "promo"
-        return "smallalk" # typo di sini, perbaiki
+        return "smalltalk" # Perbaikan typo dari 'smallalk'
     except Exception:
         if "promo" in text: return "promo"
         return "smalltalk"
 
 # ==========================================================
-# === FUNGSI PENCARIAN DIPERBAIKI (Skor Relevan) ===
+# === FUNGSI PENCARIAN STABIL (Skor Relevan) ===
 # ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     df_scored = df.copy()
@@ -151,25 +216,18 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # === INI ADALAH PERBAIKANNYA ===
-    # Jika kueri spesifik (lebih dari 1 kata kunci) tapi skornya
-    # cuma 1 (kecocokan yg sangat lemah), anggap tidak relevan/tidak ditemukan.
+    # ATURAN KETAT: Jika kueri spesifik (>1 kata kunci) tapi skornya cuma 1 (kecocokan lemah), anggap tidak relevan.
     if len(keywords) > 1 and max_score == 1:
         return pd.DataFrame(columns=df.columns)
-    # === AKHIR PERBAIKAN ===
         
     # Kembalikan baris dengan skor tertinggi
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
 # ==========================================================
-# === AKHIR PERBAIKAN ===
+# === AKHIR FUNGSI PENCARIAN ===
 # ==========================================================
 
 
 # --- UI CHAT ---
-# ... (Sisa kode tidak berubah) ...
-# (Saya potong di sini agar tidak terlalu panjang, sisa kodenya sama persis
-# dengan versi 'Bagus bgt' sebelumnya)
-
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
@@ -236,7 +294,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # Panggil fungsi find_smart_matches (NON-AI yang baru)
             matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
