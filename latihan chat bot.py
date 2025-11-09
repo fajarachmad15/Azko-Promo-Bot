@@ -251,10 +251,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
     )
-    not_found_non_voucher_answer = (
-        f"Hmm, aku cek di database Kozy, info soal itu **belum ter-update** nih. "
-        f"{finrep_template_answer}"
-    )
+    # Variabel not_found_non_voucher_answer dihapus karena sudah tidak dipakai.
     # --- AKHIR TEMPLATE ---
 
     if intent == "greeting":
@@ -297,65 +294,61 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
             matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
-                # --- BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah) ---
-                is_voucher_query = False
-                try:
-                    with st.spinner("Menganalisis pertanyaan..."):
-                        check_model = genai.GenerativeModel("models/gemini-flash-latest")
-                        check_prompt = f"""
-                        Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
-                        User: "{prompt}"
-                        Jawab HANYA 'YA' atau 'TIDAK'.
-                        """
-                        check_response = check_model.generate_content(check_prompt).text.strip().upper()
-                        if "YA" in check_response:
-                            is_voucher_query = True
-                except Exception as e:
-                    st.warning(f"AI voucher check failed: {e}. Menggunakan cek manual.")
-                    prompt_lower = prompt.lower()
-                    if "voucher" in prompt_lower or "vucher" in prompt_lower or "voucer" in prompt_lower or "vocer" in prompt_lower:
-                        is_voucher_query = True
-
-                if is_voucher_query:
-                    # --- ALUR 3 LANGKAH (KHUSUS VOUCHER) ---
-                    try:
-                        step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
-                        
-                        step_2_gemini = ""
-                        with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
-                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
-                            gemini_prompt = f"""
-                            Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
-                            Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
-                            Fokus pada apakah ini voucher umum atau spesifik untuk toko/grup tertentu.
-                            
-                            Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
-                            
-                            Contoh jika user bertanya 'voucher MAP':
-                            "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
-                            """
-                            gemini_response = gemini_model.generate_content(gemini_prompt)
-                            step_2_gemini = gemini_response.text.strip()
-
-                        answer = (
-                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
-                            f"1. {step_1_db}\n\n"
-                            f"2. {step_2_gemini}\n\n"
-                            f"3. {finrep_template_answer}"
-                        )
-
-                    except Exception as e:
-                        st.error(f"AI Gemini check (langkah 2) gagal: {e}")
-                        answer = (
-                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
-                            f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
-                            f"2. {finrep_template_answer}"
-                        )
+                # ==========================================================
+                # === BLOK JIKA DATA TIDAK DITEMUKAN (LOGIKA BARU) ===
+                # ==========================================================
+                # Alur 3 langkah ini sekarang berlaku untuk SEMUA kueri (voucher, cicilan, dll)
+                # yang tidak ditemukan di database, sesuai permintaan Anda.
                 
-                else:
-                    # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
-                    answer = not_found_non_voucher_answer
+                try:
+                    # LANGKAH 1: Info dari Database (Selalu 'tidak ada')
+                    step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
+                    
+                    # LANGKAH 2: Klarifikasi dari Gemini (Pengetahuan Umum)
+                    step_2_gemini = ""
+                    with st.spinner(f"Mencari info publik soal '{prompt}'..."):
+                        gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
+                        
+                        # Prompt ini diperbarui agar bisa menangani voucher, cicilan, atau lainnya
+                        gemini_prompt = f"""
+                        Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
+                        Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
+                        
+                        Fokus pada:
+                        - Jika itu voucher: Apakah itu voucher umum atau spesifik untuk grup tertentu?
+                        - Jika itu metode pembayaran (cth: cicilan tanpa CC): Apakah itu layanan yang umum ada (seperti PayLater)?
+                        
+                        Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
+                        
+                        Contoh jika user bertanya 'voucher MAP':
+                        "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
+                        
+                        Contoh jika user bertanya 'Cicilan tanpa kartu kredit bisa ngga?':
+                        "Setelah aku klarifikasi lebih lanjut, 'cicilan tanpa kartu kredit' itu biasanya merujuk ke layanan 'PayLater' (seperti Kredivo, Akulaku, dll.). Setahuku, ketersediaan layanan itu tergantung kerjasama langsung antara AZKO dengan penyedia layanan tersebut."
+                        """
+                        gemini_response = gemini_model.generate_content(gemini_prompt)
+                        step_2_gemini = gemini_response.text.strip()
 
+                    # LANGKAH 3: Template Finrep (Selalu disertakan)
+                    answer = (
+                        f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                        f"1. {step_1_db}\n\n"
+                        f"2. {step_2_gemini}\n\n"
+                        f"3. {finrep_template_answer}"
+                    )
+
+                except Exception as e:
+                    # Fallback jika Langkah 2 (Gemini) gagal
+                    st.error(f"AI Gemini check (langkah 2) gagal: {e}")
+                    answer = (
+                        f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                        f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
+                        f"2. {finrep_template_answer}" # Langsung ke langkah 3
+                    )
+                # ==========================================================
+                # === AKHIR BLOK DATA TIDAK DITEMUKAN ===
+                # ==========================================================
+                
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
                 promos = []
@@ -386,7 +379,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 except Exception as e:
                     st.error(f"AI summarizer Gagal: {e}")
                     answer = "Oke, aku nemu info ini di database:\n\n" + hasil
-        
+            
         except Exception as e:
             st.error(f"Error saat proses promo: {e}")
             answer = default_fallback_answer
