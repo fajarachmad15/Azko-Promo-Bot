@@ -56,20 +56,24 @@ st.markdown(
         padding-left: 1rem;
         padding-right: 1rem;
     }
+
     /* 2. Mengubah warna Primary Streamlit (Warna Merah AZKO: #BF1E2D) */
     :root {
         --primary-color: #BF1E2D; 
     }
+
     /* 3. Mengubah Header dan Font */
     h1, h2, h3, h4, .stApp {
         font-family: 'Poppins', sans-serif; /* Ganti font agar lebih modern */
     }
+
     /* 4. Mengubah warna ikon dan tombol KIRIM menjadi Merah AZKO */
     .stButton > button, .stTextInput > div > div > button {
         background-color: var(--primary-color) !important;
         color: white !important;
         border: none;
     }
+
     /* 5. Mengubah warna notifikasi Peringatan (Warning) menjadi Kuning/Oranye */
     .stAlert.stWarning {
         background-color: #FFA50040; /* Oranye muda transparan */
@@ -79,6 +83,7 @@ st.markdown(
     .stAlert.stWarning p {
         color: white; /* Agar teks di mode gelap tetap terbaca */
     }
+
     /* 6. Mempercantik Chat Input */
     .stTextInput {
         border-radius: 0.75rem;
@@ -87,6 +92,7 @@ st.markdown(
         border-radius: 0.75rem;
         border: 1px solid #BF1E2D; /* Border merah di input */
     }
+    
     /* 7. Memperjelas pemisah/garis */
     hr {
         border-top: 1px solid #BF1E2D40; /* Merah transparan */
@@ -127,41 +133,6 @@ if "last_intent" not in st.session_state:
 
 # --- FUNGSI PENDUKUNG ---
 
-# ==========================================================
-# === FUNGSI BARU: AI PEMBERSIH TYPO ===
-# ==========================================================
-@st.cache_data(ttl=3600) # Cache hasil pembersihan
-def clean_prompt_with_ai(text: str) -> str:
-    """Menggunakan AI untuk memperbaiki typo sebelum diproses."""
-    try:
-        model = genai.GenerativeModel("models/gemini-flash-latest")
-        prompt_template = f"""
-        Kamu adalah ahli ejaan Bahasa Indonesia, perbaiki typo di teks ini.
-        Balas HANYA dengan teks yang sudah diperbaiki.
-        Contoh:
-        User: vocer map
-        Kamu: voucher map
-        User: cicilan tnpa krtu krdt
-        Kamu: cicilan tanpa kartu kredit
-        User: bca kartu debitnya ngga bisa tuker point ya?
-        Kamu: bca kartu debitnya ngga bisa tukar poin ya?
-        
-        Teks: "{text}"
-        Perbaikan:
-        """
-        response = model.generate_content(prompt_template)
-        cleaned_text = response.text.strip()
-        if not cleaned_text: # Failsafe jika AI balikin kosong
-            return text
-        return cleaned_text
-    except Exception as e:
-        st.warning(f"AI Typo Cleaner Gagal: {e}. Menggunakan teks asli.")
-        return text # Jika AI gagal, gunakan teks asli
-# ==========================================================
-# === AKHIR FUNGSI BARU ===
-# ==========================================================
-
-
 @st.cache_data(ttl=3600)
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
@@ -194,23 +165,30 @@ def detect_intent_ai(text: str) -> str:
         if "other" in response: return "other"
         
         if "promo" in text: return "promo"
-        return "smalltalk"
+        return "smalltalk" # Perbaikan typo dari 'smallalk'
     except Exception:
         if "promo" in text: return "promo"
         return "smalltalk"
 
+# ==========================================================
+# === FUNGSI PENCARIAN STABIL (Skor Relevan) ===
+# ==========================================================
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     df_scored = df.copy()
     
+    # Daftar kata-kata umum (stop words) untuk diabaikan
     STOP_WORDS = set([
         "ada", "apa", "aja", "bisa", "buat", "biar", "cara", "cek", "coba",
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai", "berarti"
+        "digunakan", "dipakai"
     ])
     
+    # 1. Ambil semua kata dari query (minimal 3 huruf)
     words = re.findall(r'\b\w{3,}\b', query.lower())
+    
+    # 2. Saring kata-kata, buang stop words
     keywords = [word for word in words if word not in STOP_WORDS]
 
     if not keywords:
@@ -219,7 +197,7 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
             keywords = words
 
     if not keywords:
-        return pd.DataFrame(columns=df.columns) 
+        return pd.DataFrame(columns=df.columns) # Return empty
 
     df_scored['match_score'] = 0
 
@@ -238,11 +216,15 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # ATURAN KETAT: Jika skor tidak sempurna, anggap tidak relevan.
-    if max_score < len(keywords):
+    # ATURAN KETAT: Jika kueri spesifik (>1 kata kunci) tapi skornya cuma 1 (kecocokan lemah), anggap tidak relevan.
+    if len(keywords) > 1 and max_score == 1:
         return pd.DataFrame(columns=df.columns)
         
+    # Kembalikan baris dengan skor tertinggi
     return df_scored[df_scored['match_score'] == max_score].drop(columns=['match_score'])
+# ==========================================================
+# === AKHIR FUNGSI PENCARIAN ===
+# ==========================================================
 
 
 # --- UI CHAT ---
@@ -255,19 +237,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     st.chat_message("user").markdown(prompt)
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # ==========================================================
-    # === PERUBAHAN: LANGKAH 0 - PEMBERSIHAN TYPO ===
-    # ==========================================================
-    # Simpan prompt asli untuk ditampilkan
-    original_prompt = prompt 
-    
-    # Lakukan pembersihan typo
-    with st.spinner("Memproses..."):
-        cleaned_prompt = clean_prompt_with_ai(original_prompt)
-    # ==========================================================
-
-    # Gunakan 'cleaned_prompt' untuk semua logika internal
-    intent = detect_intent_ai(cleaned_prompt)
+    intent = detect_intent_ai(prompt)
     topic_changed = (intent != st.session_state.last_intent)
     
     if topic_changed:
@@ -280,6 +250,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
     finrep_template_answer = (
         "Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** "
         "atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
+    )
+    not_found_non_voucher_answer = (
+        f"Hmm, aku cek di database Kozy, info soal itu **belum ter-update** nih. "
+        f"{finrep_template_answer}"
     )
     # --- AKHIR TEMPLATE ---
 
@@ -295,11 +269,18 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         try:
             with st.spinner("..."):
                 model = genai.GenerativeModel("models/gemini-flash-latest")
-                # Gunakan cleaned_prompt untuk smalltalk
                 prompt_smalltalk = f"""
                 Kamu adalah Kozy, asisten kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point (seperti teman kerja).
-                User baru saja bilang: "{cleaned_prompt}"
+                User baru saja bilang: "{prompt}"
                 Beri respon smalltalk yang sesuai. JANGAN mencari promo.
+                
+                Contoh 1:
+                User: bener kamu bisa jawab seputar promo?
+                Kamu: Bener dong, coba aja siapa takut! 😉 Ada promo apa yang kamu cari?
+                
+                Contoh 2:
+                User: kamu siapa?
+                Kamu: Aku Kozy, asisten promo kamu. Siap bantu!
                 """
                 answer = model.generate_content(prompt_smalltalk).text.strip()
         except Exception:
@@ -313,21 +294,67 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # Gunakan cleaned_prompt untuk mencari
-            matches = find_smart_matches(df_original, cleaned_prompt)
+            matches = find_smart_matches(df_original, prompt)
 
             if matches.empty:
-                # --- BLOK 'TIDAK DITEMUKAN' (LOGIKA 1&3) ---
+                # --- BLOK JIKA DATA TIDAK DITEMUKAN (Logika alur 3 langkah) ---
+                is_voucher_query = False
+                try:
+                    with st.spinner("Menganalisis pertanyaan..."):
+                        check_model = genai.GenerativeModel("models/gemini-flash-latest")
+                        check_prompt = f"""
+                        Apakah pertanyaan user ini spesifik tentang 'voucher' (termasuk typo 'vucher', 'voucer', 'vocer')?
+                        User: "{prompt}"
+                        Jawab HANYA 'YA' atau 'TIDAK'.
+                        """
+                        check_response = check_model.generate_content(check_prompt).text.strip().upper()
+                        if "YA" in check_response:
+                            is_voucher_query = True
+                except Exception as e:
+                    st.warning(f"AI voucher check failed: {e}. Menggunakan cek manual.")
+                    prompt_lower = prompt.lower()
+                    if "voucher" in prompt_lower or "vucher" in prompt_lower or "voucer" in prompt_lower or "vocer" in prompt_lower:
+                        is_voucher_query = True
+
+                if is_voucher_query:
+                    # --- ALUR 3 LANGKAH (KHUSUS VOUCHER) ---
+                    try:
+                        step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
+                        
+                        step_2_gemini = ""
+                        with st.spinner(f"Mencari info publik soal '{prompt}' via Google..."):
+                            gemini_model = genai.GenerativeModel("models/gemini-flash-latest")
+                            gemini_prompt = f"""
+                            Anda adalah asisten AI. Kasir bertanya tentang '{prompt}' yang tidak ada di database internal.
+                            Berdasarkan pengetahuan publik Anda, berikan klarifikasi singkat dan netral tentang '{prompt}' tersebut. 
+                            Fokus pada apakah ini voucher umum atau spesifik untuk toko/grup tertentu.
+                            
+                            Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
+                            
+                            Contoh jika user bertanya 'voucher MAP':
+                            "Setelah aku klarifikasi lebih lanjut, voucher MAP itu setahuku untuk toko-toko di bawah grup Mitra Adiperkasa (seperti Sogo, Zara, dll), dan AZKO sepertinya belum termasuk."
+                            """
+                            gemini_response = gemini_model.generate_content(gemini_prompt)
+                            step_2_gemini = gemini_response.text.strip()
+
+                        answer = (
+                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                            f"1. {step_1_db}\n\n"
+                            f"2. {step_2_gemini}\n\n"
+                            f"3. {finrep_template_answer}"
+                        )
+
+                    except Exception as e:
+                        st.error(f"AI Gemini check (langkah 2) gagal: {e}")
+                        answer = (
+                            f"Oke, aku bantu cek ya untuk **{prompt}**:\n\n"
+                            f"1. Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar**.\n\n"
+                            f"2. {finrep_template_answer}"
+                        )
                 
-                # Gunakan cleaned_prompt untuk narasi
-                step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{cleaned_prompt}' belum terdaftar** nih."
-                step_3_finrep = finrep_template_answer
-                
-                answer = (
-                    f"Oke, aku bantu cek ya:\n\n"
-                    f"1. {step_1_db}\n\n"
-                    f"2. {step_3_finrep}"
-                )
+                else:
+                    # --- ALUR 2 LANGKAH (PROMO NON-VOUCHER) ---
+                    answer = not_found_non_voucher_answer
 
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
@@ -335,7 +362,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 for _, r in matches.iterrows():
                     promos.append(
                         f"• **{r.get('NAMA_PROMO','')}** ({r.get('PROMO_STATUS','')})\n"
-                        f"📅 Periode: {r.get('PERIO','')}\n" # Typo di kode lama? Seharusnya PERIODE
+                        f"📅 Periode: {r.get('PERIODE','')}\n"
                         f"📝 {r.get('SYARAT_UTAMA','')}\n"
                         f"💰 {r.get('DETAIL_DISKON','')}\n"
                         f"🏦 Bank: {r.get('BANK_PARTNER','')}"
@@ -345,13 +372,14 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 try:
                     with st.spinner("Merangkum info..."):
                         model = genai.GenerativeModel("models/gemini-flash-latest")
-                        # Gunakan cleaned_prompt untuk konteks
                         instr = (
                             "Kamu adalah Kozy, asisten internal kasir AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point.\n"
-                            f"User baru saja bertanya (setelah perbaikan typo): '{cleaned_prompt}'\n"
+                            f"User baru saja bertanya: '{prompt}'\n"
                             "Aku sudah menemukan data promo berikut dari database:\n\n"
                             f"{hasil}\n\n"
                             "Tugasmu: Berikan jawaban yang merangkum data ini. JANGAN berhalusinasi atau menambah info di luar data. Mulai dengan sapaan ramah.\n"
+                            "Contoh 1: 'Oke, nemu nih! Untuk cicilan, kita ada...'\n"
+                            "Contoh 2: 'Siap. Ini dia info untuk voucher yang kamu cari...'"
                         )
                         resp = model.generate_content(instr)
                         answer = getattr(resp, "text", hasil) 
@@ -371,5 +399,5 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
         st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n" # Simpan prompt asli di konteks
+    st.session_state.context += f"User: {prompt}\nKozy: {answer}\n"
     st.session_state.last_intent = intent
