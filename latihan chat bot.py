@@ -181,25 +181,34 @@ def detect_intent_ai(text: str) -> str:
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     df_scored = df.copy()
     
-    # === PERBAIKAN 1: Menambahkan kata-kata umum ke STOP_WORDS ===
+    # === PERBAIKAN 1: Menambahkan STOP WORDS Bahasa Inggris ===
+    # Gabungkan stop words Indonesia dan Inggris
     STOP_WORDS = set([
+        # Indonesia
         "ada", "apa", "aja", "bisa", "buat", "biar", "cara", "cek", "coba",
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai", "berarti",
-        "bank", "pake", "point", "program" # <- TAMBAHAN BARU
+        "digunakan", "dipakai", "berarti", "bank", "pake", "point", "program",
+        
+        # Inggris (Umum)
+        "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "for", 
+        "from", "how", "i", "is", "it", "in", "made", "of", "on", "or", "that", 
+        "the", "this", "to", "using", "what", "which", "with", "any", "available"
     ])
+    # ==========================================================
     
-    # 1. Ambil semua kata dari query (minimal 3 huruf)
-    words = re.findall(r'\b\w{3,}\b', query.lower())
+    # 1. Ambil semua kata dari query (minimal 3 huruf, KECUALI 'be', 'do', 'is', 'it', 'on', 'at')
+    # Regex diubah sedikit untuk mengizinkan kata 2 huruf yang ada di STOP_WORDS
+    words = re.findall(r'\b\w{2,}\b', query.lower()) 
     
     # 2. Saring kata-kata, buang stop words
     keywords = [word for word in words if word not in STOP_WORDS]
 
     if not keywords:
         # Fallback jika semua kata adalah stop words
-        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan", "poin", "redeem", "installment"]]
+        # 'points' dan 'installments' akan ditangkap di sini jika tidak ada kata lain
+        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan", "poin", "points", "redeem", "installment", "installments"]]
         if not keywords:
             keywords = words # Gunakan kata asli jika fallback gagal
 
@@ -225,7 +234,6 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
         
     # ATURAN KETAT (DIPERTAHANKAN):
     # Skor tertinggi (max_score) HARUS SAMA DENGAN jumlah kata kunci.
-    # Ini penting untuk memblokir "cicilan TANPA kartu kredit"
     if max_score < len(keywords):
         return pd.DataFrame(columns=df.columns) # Kembalikan nol jika tidak semua keyword cocok
         
@@ -240,19 +248,26 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
 # ==========================================================
 def normalize_query(query: str) -> str:
     """
-    Menerjemahkan sinonim (Inggris/Singkatan) ke istilah
+    Menerjemahkan sinonim (Inggris/Singkatan/Plural) ke istilah
     yang ada di database (Indonesia).
     """
     q = query.lower()
     
-    # Urutan penting: ganti yang spesifik dulu
+    # --- PERBAIKAN 2: Menangani Plural ---
+    # Urutan penting: ganti yang spesifik dan plural dulu
+    q = q.replace("redeem points", "tukar poin")
+    q = q.replace("reward points", "tukar poin")
     q = q.replace("redeem point", "tukar poin")
     q = q.replace("reward point", "tukar poin")
     
-    # Ganti yang umum
-    q = q.replace("installment", "cicilan")
+    q = q.replace("installments", "cicilan") # Plural
+    q = q.replace("installment", "cicilan")  # Singular
+    
+    q = q.replace("points", "poin") # Plural
+    q = q.replace("point", "poin")  # Singular
+    
     q = q.replace("redeem", "tukar")
-    q = q.replace("point", "poin")
+    # ==========================================================
     
     return q
 # ==========================================================
@@ -321,10 +336,10 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # === PERBAIKAN 2: Gunakan fungsi normalisasi ===
+            # Gunakan fungsi normalisasi yang sudah disempurnakan
             normalized_prompt = normalize_query(prompt)
             
-            # Mencari menggunakan kueri yang sudah dinormalisasi
+            # Mencari menggunakan kueri yang sudah dinormalisasi dan stop words yg diperbanyak
             matches = find_smart_matches(df_original, normalized_prompt)
 
             if matches.empty:
@@ -334,7 +349,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 
                 try:
                     # LANGKAH 1: Info dari Database (Selalu 'tidak ada')
-                    # Tampilkan prompt asli dari user, bukan yang sudah dinormalisasi
                     step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
                     
                     # LANGKAH 2: Klarifikasi dari Gemini (Pengetahuan Umum)
@@ -358,8 +372,8 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         Contoh jika user bertanya 'Cicilan tanpa kartu kredit bisa ngga?':
                         "Setelah aku klarifikasi lebih lanjut, 'cicilan tanpa kartu kredit' itu biasanya merujuk ke layanan 'PayLater' (seperti Kredivo, Akulaku, dll.). Setahuku, ketersediaan layanan itu tergantung kerjasama langsung antara AZKO dengan penyedia layanan tersebut."
                         
-                        Contoh jika user bertanya 'installment bisa pakai bank apa saja?':
-                        "Setelah aku klarifikasi lebih lanjut, pertanyaan mengenai 'installment' itu biasanya merujuk pada metode pembayaran cicilan kartu kredit (credit card installment). Ini adalah layanan umum yang disediakan oleh bank penerbit kartu kredit."
+                        Contoh jika user bertanya 'installments can be made using any bank?':
+                        "Setelah aku klarifikasi lebih lanjut, pertanyaan mengenai 'installment' (cicilan) yang bisa digunakan dengan bank apa saja itu biasanya merujuk pada metode pembayaran Cicilan Kartu Kredit (Credit Card Installment)."
                         """
                         gemini_response = gemini_model.generate_content(gemini_prompt)
                         step_2_gemini = gemini_response.text.strip()
@@ -386,7 +400,6 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 
             else:
                 # --- BLOK JIKA DATA DITEMUKAN (AI Perangkum) ---
-                # Hanya akan masuk ke sini jika SEMUA kata kunci cocok
                 promos = []
                 for _, r in matches.iterrows():
                     promos.append(
