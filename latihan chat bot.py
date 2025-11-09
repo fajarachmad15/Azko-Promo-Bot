@@ -137,7 +137,6 @@ if "last_intent" not in st.session_state:
 def detect_intent_ai(text: str) -> str:
     text = text.lower().strip()
     
-    # === PERBAIKAN 1: Menambahkan sapaan Inggris ke regex ===
     simple_greetings = re.search(r"\b(halo|hai|hi|hello|hey|selamat (pagi|siang|sore|malam)|morning|afternoon|evening)\b", text)
     simple_thanks = re.search(r"\b(terima kasih|makasih|thanks|tq)\b", text)
     simple_goodbye = re.search(r"\b(dah|bye|sampai jumpa|exit)\b", text)
@@ -149,12 +148,11 @@ def detect_intent_ai(text: str) -> str:
     try:
         model = genai.GenerativeModel("models/gemini-flash-latest")
         
-        # === PERBAIKAN 2: Menambahkan contoh "redeem point" ke prompt AI ===
         prompt = f"""
         Klasifikasikan maksud (intent) dari user (seorang kasir) berikut.
         Pilih HANYA SATU dari kategori ini: [promo_search, smalltalk, other]
         
-        - "promo_search": User MENCARI info promo spesifik. (Contoh: "ada promo apa", "cicilan BCA", "voucher MAP", "diskon BSI", "tukar poin", "redeem point").
+        - "promo_search": User MENCARI info promo spesifik. (Contoh: "ada promo apa", "cicilan BCA", "voucher MAP", "diskon BSI", "tukar poin", "redeem point", "installment").
         - "smalltalk": Basa-basi ATAU pertanyaan TENTANG kamu (si bot). (Contoh: "apa kabar", "kamu siapa", "bener kamu bisa jawab?", "lagi apa", "morning").
         - "other": Pertanyaan di luar topik.
         
@@ -168,12 +166,12 @@ def detect_intent_ai(text: str) -> str:
         if "other" in response: return "other"
         
         # Fallback jika AI bingung
-        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text:
+        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text or "installment" in text:
             return "promo"
         return "smalltalk" 
     except Exception:
         # Fallback jika AI error
-        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text:
+        if "promo" in text or "diskon" in text or "voucher" in text or "poin" in text or "redeem" in text or "installment" in text:
             return "promo"
         return "smalltalk"
 
@@ -183,13 +181,14 @@ def detect_intent_ai(text: str) -> str:
 def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     df_scored = df.copy()
     
-    # Daftar kata-kata umum (stop words) untuk diabaikan
+    # === PERBAIKAN 1: Menambahkan kata-kata umum ke STOP_WORDS ===
     STOP_WORDS = set([
         "ada", "apa", "aja", "bisa", "buat", "biar", "cara", "cek", "coba",
         "dari", "dengan", "dong", "di", "gak", "gimana", "kalau", "ka",
         "ke", "kok", "kita", "lagi", "mau", "nih", "ngga", "pakai",
         "saja", "saya", "sekarang", "tolong", "untuk", "ya", "yg", "transaksi",
-        "digunakan", "dipakai", "berarti"
+        "digunakan", "dipakai", "berarti",
+        "bank", "pake", "point", "program" # <- TAMBAHAN BARU
     ])
     
     # 1. Ambil semua kata dari query (minimal 3 huruf)
@@ -199,9 +198,10 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     keywords = [word for word in words if word not in STOP_WORDS]
 
     if not keywords:
-        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan", "poin", "redeem"]]
+        # Fallback jika semua kata adalah stop words
+        keywords = [word for word in words if word in ["voucher", "promo", "diskon", "cashback", "cicilan", "poin", "redeem", "installment"]]
         if not keywords:
-            keywords = words
+            keywords = words # Gunakan kata asli jika fallback gagal
 
     if not keywords:
         return pd.DataFrame(columns=df.columns) # Return empty
@@ -223,8 +223,9 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
     if max_score == 0:
         return pd.DataFrame(columns=df.columns)
         
-    # ATURAN KETAT BARU:
+    # ATURAN KETAT (DIPERTAHANKAN):
     # Skor tertinggi (max_score) HARUS SAMA DENGAN jumlah kata kunci.
+    # Ini penting untuk memblokir "cicilan TANPA kartu kredit"
     if max_score < len(keywords):
         return pd.DataFrame(columns=df.columns) # Kembalikan nol jika tidak semua keyword cocok
         
@@ -234,6 +235,27 @@ def find_smart_matches(df: pd.DataFrame, query: str) -> pd.DataFrame:
 # === AKHIR FUNGSI PENCARIAN ===
 # ==========================================================
 
+# ==========================================================
+# === FUNGSI BARU: Normalisasi Kueri ===
+# ==========================================================
+def normalize_query(query: str) -> str:
+    """
+    Menerjemahkan sinonim (Inggris/Singkatan) ke istilah
+    yang ada di database (Indonesia).
+    """
+    q = query.lower()
+    
+    # Urutan penting: ganti yang spesifik dulu
+    q = q.replace("redeem point", "tukar poin")
+    q = q.replace("reward point", "tukar poin")
+    
+    # Ganti yang umum
+    q = q.replace("installment", "cicilan")
+    q = q.replace("redeem", "tukar")
+    q = q.replace("point", "poin")
+    
+    return q
+# ==========================================================
 
 # --- UI CHAT ---
 for msg in st.session_state.messages:
@@ -299,8 +321,11 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
 
     elif intent == "promo":
         try:
-            # Fungsi pencarian yang LEBIH KETAT sekarang dijalankan
-            matches = find_smart_matches(df_original, prompt)
+            # === PERBAIKAN 2: Gunakan fungsi normalisasi ===
+            normalized_prompt = normalize_query(prompt)
+            
+            # Mencari menggunakan kueri yang sudah dinormalisasi
+            matches = find_smart_matches(df_original, normalized_prompt)
 
             if matches.empty:
                 # ==========================================================
@@ -309,6 +334,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                 
                 try:
                     # LANGKAH 1: Info dari Database (Selalu 'tidak ada')
+                    # Tampilkan prompt asli dari user, bukan yang sudah dinormalisasi
                     step_1_db = f"Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih."
                     
                     # LANGKAH 2: Klarifikasi dari Gemini (Pengetahuan Umum)
@@ -322,7 +348,7 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         
                         Fokus pada:
                         - Jika itu voucher: Apakah itu voucher umum atau spesifik untuk grup tertentu?
-                        - Jika itu metode pembayaran (cth: cicilan tanpa CC): Apakah itu layanan yang umum ada (seperti PayLater)?
+                        - Jika itu metode pembayaran (cth: cicilan tanpa CC, installment): Apakah itu layanan yang umum ada (seperti PayLater atau cicilan kartu kredit)?
                         
                         Mulai jawaban Anda dengan "Setelah aku klarifikasi lebih lanjut...".
                         
@@ -331,6 +357,9 @@ if prompt := st.chat_input("Ketik info promo yang dicari..."):
                         
                         Contoh jika user bertanya 'Cicilan tanpa kartu kredit bisa ngga?':
                         "Setelah aku klarifikasi lebih lanjut, 'cicilan tanpa kartu kredit' itu biasanya merujuk ke layanan 'PayLater' (seperti Kredivo, Akulaku, dll.). Setahuku, ketersediaan layanan itu tergantung kerjasama langsung antara AZKO dengan penyedia layanan tersebut."
+                        
+                        Contoh jika user bertanya 'installment bisa pakai bank apa saja?':
+                        "Setelah aku klarifikasi lebih lanjut, pertanyaan mengenai 'installment' itu biasanya merujuk pada metode pembayaran cicilan kartu kredit (credit card installment). Ini adalah layanan umum yang disediakan oleh bank penerbit kartu kredit."
                         """
                         gemini_response = gemini_model.generate_content(gemini_prompt)
                         step_2_gemini = gemini_response.text.strip()
