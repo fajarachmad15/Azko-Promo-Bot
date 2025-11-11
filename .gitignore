@@ -1,0 +1,6 @@
+# Abaikan file rahasia
+secrets.toml
+.streamlit/secrets.toml
+
+# Abaikan file .json (jika ada)
+*.json
