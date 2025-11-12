@@ -3,3 +3,4 @@ google-generativeai
 gspread
 pandas
 google-auth
+tabulate
