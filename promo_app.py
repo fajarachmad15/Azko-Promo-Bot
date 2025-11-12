@@ -255,8 +255,8 @@ def run_chatbot_app():
         <div style='text-align: center; margin-bottom: 0.5rem;'>
             <img src="https://raw.githubusercontent.com/fajarachmad15/Azko-Promo-Bot/main/azko-logo-white-on-red.png" alt="AZKO Logo" style="width: 50px; margin-bottom: 0.5rem;">
             <h1 style='margin-bottom: 0.2rem; font-size: 2.2rem;'>Kozy – Asisten Kasir AZKO</h1>
-            <p style='color: gray; font-size: 1.2rem;'>supported by <b>Gemini AI</b></p>
-            <p style='color: #d9534f; font-size: 1.2rem;'>⚠️ Kozy dapat membuat kesalahan. Selalu konfirmasi info penting.</p>
+            <p style='color: gray; font-size: 1.0rem;'>supported by <b>Gemini AI</b></p>
+            <p style='color: #d9534f; font-size: 1.0rem;'>⚠️ Kozy dapat membuat kesalahan. Selalu konfirmasi info penting.</p>
         </div>
         """,
         unsafe_allow_html=True
