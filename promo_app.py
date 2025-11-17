@@ -1,4 +1,4 @@
-import re
+import re  # <-- 1. TAMBAHKAN BARIS INI DI ATAS
 import os
 import streamlit as st
 import gspread
@@ -113,6 +113,12 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame):
     ---
 
     ATURAN CARA MENJAWAB (WAJIB IKUTI!):
+
+    **ATURAN FORMAT LINK (PENTING!):**
+    * Jika kamu menemukan URL/link di dalam database (misal: di kolom `DETAIL_DISKON`), kamu **WAJIB** menampilkannya sebagai link Markdown yang bisa diklik.
+    * Formatnya adalah `[Teks Tampilan](URL)`.
+    * **CONTOH SALAH:** `Link Tebus Hemat: https://docs.google.com/...`
+    * **CONTOH BENAR:** `Detail barang ada di [Link Spreadsheet Tebus Hemat](https://docs.google.com/...)`
 
     1.  **JIKA HANYA SAPAAN/SMALLTALK** (misal: "pagi kozy", "apa kabar", "kamu siapa"):
         * JANGAN cari di database.
@@ -303,7 +309,14 @@ def run_chatbot_app():
 
         # 3. Tampilkan jawaban AI
         with st.chat_message("assistant"):
-            st.markdown(answer)
+            # <-- 2. TAMBAHKAN BARIS INI (PENGECEKAN LINK)
+            # Regex ini mencari URL (http/https) dan mengubahnya jadi link Markdown
+            # Ini "memperbaiki" jika AI lupa memformatnya.
+            answer_with_links = re.sub(r'(\bhttps?://[^\s]+)', r'[\1](\1)', answer)
+            
+            st.markdown(answer_with_links) # Tampilkan jawaban yang sudah diformat
+            
+        # Simpan jawaban ASLI dari AI ke history (tanpa format link)
         st.session_state.messages.append({"role": "assistant", "content": answer})
 
 
