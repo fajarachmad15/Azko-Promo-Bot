@@ -5,7 +5,7 @@ import gspread
 import pandas as pd
 import google.generativeai as genai
 
-# =S========================================================
+# ==========================================================
 # === FUNGSI LOGIN (TIDAK BERUBAH) ===
 # ==========================================================
 def login_form():
@@ -54,15 +54,15 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" BARU (RAG) ===
+# === "OTAK AI" (DIPERBAIKI: PAKAI FILTERING) ===
 # ==========================================================
-@st.cache_data(ttl=300) # Cache data GSheet selama 5 menit
-def get_database_df(_gc, sheet_key): # <-- PERBAIKAN ERROR CACHE
+@st.cache_data(ttl=300) 
+def get_database_df(_gc, sheet_key): 
     """Mengambil dan men-cache DataFrame dari Google Sheets."""
     try:
-        sheet = _gc.open_by_key(sheet_key).worksheet("promo") # <-- PERBAIKAN ERROR CACHE
+        sheet = _gc.open_by_key(sheet_key).worksheet("promo") 
         df = pd.DataFrame(sheet.get_all_records())
-        # Pastikan kolom penting adalah string
+        # Pastikan kolom penting adalah string dan LOWERCASE untuk memudahkan pencarian
         for col in ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON', 'SYARAT_UTAMA']:
             if col in df.columns:
                 df[col] = df[col].astype(str)
@@ -73,100 +73,102 @@ def get_database_df(_gc, sheet_key): # <-- PERBAIKAN ERROR CACHE
 
 def get_ai_response(prompt: str, df_database: pd.DataFrame):
     """
-    Fungsi "Otak AI" utama.
-    AI akan menganalisis prompt dan database, lalu menghasilkan jawaban.
+    Fungsi "Otak AI" UTAMA (YANG DIPERBAIKI).
+    Sekarang menggunakan logika filtering Python sebelum kirim ke AI.
     """
     
-    # Ubah DataFrame menjadi string Markdown agar ringkas & mudah dibaca AI
+    # --- LANGKAH 1: FILTERING DI PYTHON (HEMAT TOKEN) ---
+    # Kita cari baris yang mengandung kata kunci dari prompt user
+    prompt_lower = prompt.lower()
+    keywords = prompt_lower.split()
+    
+    # Buat mask pencarian (default False)
+    mask = pd.Series([False] * len(df_database))
+    
+    # Cek apakah keyword ada di kolom-kolom penting
+    # (Menggunakan try-except untuk menghindari error jika kolom tidak ada)
+    cols_to_search = ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON']
+    valid_search_cols = [c for c in cols_to_search if c in df_database.columns]
+
+    found_keyword = False
+    for word in keywords:
+        # Abaikan kata pendek (< 3 huruf) biar tidak terlalu umum
+        if len(word) >= 3:
+            for col in valid_search_cols:
+                # Cari kata kunci (case insensitive)
+                mask = mask | df_database[col].str.contains(word, case=False, na=False)
+                found_keyword = True
+    
+    # Terapkan filter
+    if found_keyword:
+        df_filtered = df_database[mask]
+    else:
+        # Jika prompt terlalu pendek, jangan ambil semua data, kosongkan saja biar AI jawab umum
+        df_filtered = pd.DataFrame()
+
+    # Batasi maksimal 5-10 promo saja agar token tidak jebol
+    if len(df_filtered) > 8:
+        df_filtered = df_filtered.head(8)
+
+    # --- LANGKAH 2: FORMAT DATA KE MARKDOWN ---
     kolom_relevan = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
     kolom_valid = [kol for kol in kolom_relevan if kol in df_database.columns]
     
-    if not kolom_valid:
-        st.error("Database tidak memiliki kolom yang diharapkan (NAMA_PROMO, BANK_PARTNER, dll.)")
-        return "Maaf, database promo sepertinya sedang kosong."
-        
-    db_string = df_database[kolom_valid].to_markdown(index=False)
+    if not df_filtered.empty:
+        db_string = df_filtered[kolom_valid].to_markdown(index=False)
+        status_msg = "(Data ditemukan di database)"
+    else:
+        db_string = "TIDAK ADA DATA PROMO YANG COCOK DENGAN KATA KUNCI USER."
+        status_msg = "(Data tidak ditemukan)"
     
-    # Ambil riwayat chat terakhir untuk konteks
+    # Ambil riwayat chat terakhir
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
-        for msg in st.session_state.messages[-4:] # Ambil 4 chat terakhir
+        for msg in st.session_state.messages[-4:] 
     ])
 
-    model = genai.GenerativeModel("models/gemini-flash-latest")
+    # Konfigurasi Model (Menggunakan Flash agar hemat)
+    model = genai.GenerativeModel("models/gemini-2.5-flash") # Update ke model terbaru/flash
     
-    # ==========================================================
-    # === MASTER PROMPT V5 (OTAK PINTAR, RESPON AMAN) ===
-    # ==========================================================
+    # --- LANGKAH 3: PROMPT (TIDAK BERUBAH SECARA ESENSI) ---
     gemini_prompt = f"""
-    Kamu adalah Kozy, asisten kasir internal AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point (seperti teman kerja, BUKAN customer).
+    Kamu adalah Kozy, asisten kasir internal AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point.
 
-    TUGAS UTAMA:
-    Jawab pertanyaan User ({prompt}) berdasarkan **KONTEKS DATABASE PROMO** di bawah. JANGAN berhalusinasi atau menambah info di luar database.
+    TUGAS:
+    Jawab pertanyaan User ("{prompt}") berdasarkan DATA TERFILTER berikut.
 
     ---
-    KONTEKS DATABASE PROMO (format Markdown):
+    DATA PROMO TERFILTER:
     {db_string}
     ---
-    RIWAYAT CHAT SEBELUMNYA (untuk konteks percakapan):
+    RIWAYAT CHAT:
     {history}
     ---
 
-    ATURAN CARA MENJAWAB (WAJIB IKUTI!):
-
-    **ATURAN FORMAT LINK (PENTING!):** # <-- PERUBAHAN DI SINI
-    * Jika kamu menemukan URL/link di dalam database (misal: di kolom `DETAIL_DISKON`), kamu **WAJIB** menampilkannya sebagai link Markdown yang bisa diklik.
-    * Formatnya adalah `[Teks Tampilan](URL)`.
-    * **CONTOH SALAH:** `Link Tebus Hemat: https://docs.google.com/...`
-    * **CONTOH BENAR:** `Detail barang ada di [Link Spreadsheet Tebus Hemat](https://docs.google.com/...)`
-
-    1.  **JIKA HANYA SAPAAN/SMALLTALK** (misal: "pagi kozy", "apa kabar", "kamu siapa"):
-        * JANGAN cari di database.
-        * Balas sapaan itu dengan ramah sebagai rekan kerja.
-        * Contoh Balasan: "Pagi juga! Semangat ya. Ada info promo yang dicari?" atau "Aku Kozy, asisten promo kamu. Siap bantu!"
-
-    2.  **JIKA DATA DITEMUKAN DI DATABASE** (misal: "cicilan bca", "potong poin", "tenor berapa lama"):
-        * AI HARUS CERDAS: Pahami bahwa "tenor" ada di kolom `DETAIL_DISKON`. Pahami "potong poin" ada di `NAMA_PROMO`.
-        * Cari baris yang paling relevan di database, lalu rangkum infonya.
-        * Mulai dengan sapaan (Contoh: "Oke, nemu nih! Untuk cicilan BCA...").
-        * Contoh Pertanyaan "cicilan tenor berapa lama?": AI harus melihat `DETAIL_DISKON` dan merangkum "Tersedia tenor 3bln, 6bln, dan 12bln."
-
-    3.  **JIKA DATA TIDAK DITEMUKAN DI DATABASE** (misal: "voucher MAP", "cicilan bank danamon", "promo paylater"):
-        * **PENTING!** Kamu harus meniru format 3-langkah yang kaku dan aman ini untuk melindungi kasir dari kesalahan.
-        * **JANGAN** memberi jawaban singkat (seperti "voucher MAP belum bisa").
-        * **WAJIB IKUTI FORMAT INI:**
-        
-            "Oke, aku bantu cek ya untuk **{prompt}**:
-
-            1.  Aku sudah cek di database Kozy, tapi **ketentuan untuk '{prompt}' di AZKO belum terdaftar** nih.
-
-            2.  Setelah aku klarifikasi lebih lanjut, [TULIS HASIL KLARIFIKASI PENGETAHUAN UMUM AI DI SINI. Contoh: 'Voucher MAP (Mitra Adiperkasa) adalah voucher hadiah spesifik (closed-loop) yang umumnya hanya dapat ditukarkan di jaringan toko di bawah naungan Grup Mitra Adiperkasa (seperti Sogo, Zara, dll).']
-
-            3.  Untuk kepastian lebih lanjut, silakan **cek email dari Partnership/PNA** atau **bertanya ke Finrep Area kamu** ya. Selalu pastikan info promo sebelum transaksi. 👍"
-        
-    ---
-    PERTANYAAN USER SAAT INI: "{prompt}"
-
+    ATURAN:
+    1. Jika data ada di tabel di atas, jelaskan detailnya (Nama, Bank, Diskon, Syarat).
+    2. Jika kolom 'DETAIL_DISKON' berisi Link/URL, WAJIB tampilkan format: `[Klik Detail Disini](URL)`.
+    3. Jika data KOSONG/TIDAK ADA di tabel terfilter:
+       - Katakan: "Maaf, aku cek database belum nemu info soal '{prompt}'."
+       - Sarankan hubungi SPV/Finrep.
+       - Jangan mengarang promo yang tidak ada.
+    
     Jawaban Kozy:
     """
-    # ==========================================================
-    # === AKHIR MASTER PROMPT ===
-    # ==========================================================
 
     try:
         response = model.generate_content(gemini_prompt)
         return response.text.strip()
     except Exception as e:
-        # Menangani error jika ada safety setting atau API error
         st.error(f"Error dari API Gemini: {e}")
         return "Duh, maaf, Kozy lagi agak error nih. Coba tanya lagi ya."
 
 # ==========================================================
-# === APLIKASI CHATBOT UTAMA (DIREKONSTRUKSI) ===
+# === APLIKASI CHATBOT UTAMA (STRUKTUR TETAP) ===
 # ==========================================================
 def run_chatbot_app():
     """
-    Ini adalah kode aplikasi chatbot Anda yang sudah direkonstruksi.
+    Ini adalah kode aplikasi chatbot Anda.
     """
 
     # --- KONFIGURASI API DAN SHEETS ---
@@ -197,14 +199,14 @@ def run_chatbot_app():
         st.error("Tambahkan 'SHEET_KEY' di Streamlit Secrets.")
         st.stop()
 
-    # --- AMBIL DATA DARI G-SHEET (MENGGUNAKAN CACHE) ---
+    # --- AMBIL DATA DARI G-SHEET ---
     df_original = get_database_df(gc, SHEET_KEY)
 
     # --- KONFIGURASI HALAMAN ---
     st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
 
     # ==========================================================
-    # === CSS KUSTOM (TIDAK BERUBAH) ===
+    # === CSS KUSTOM (SESUAI PERMINTAAN: TIDAK BERUBAH) ===
     # ==========================================================
     st.markdown(
         """
@@ -269,9 +271,6 @@ def run_chatbot_app():
     )
 
     st.markdown("---") # Garis pemisah visual
-    # ==========================================================
-    # === AKHIR CSS DAN HEADER ===
-    # ==========================================================
 
 
     # --- STATE INISIALISASI ---
@@ -291,7 +290,7 @@ def run_chatbot_app():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # --- INPUT CHAT (LOGIKA BARU YANG JAUH LEBIH SIMPEL) ---
+    # --- INPUT CHAT ---
     if prompt := st.chat_input("Ketik info promo yang dicari..."):
         # 1. Tampilkan pertanyaan user
         st.chat_message("user").markdown(prompt)
@@ -300,7 +299,7 @@ def run_chatbot_app():
         # 2. Panggil "Otak AI"
         try:
             with st.spinner("Kozy lagi mikir..."):
-                # Ini adalah satu-satunya panggilan logika
+                # PANGGILAN FUNGSI YANG SUDAH KITA PERBAIKI DI ATAS
                 answer = get_ai_response(prompt, df_original) 
         
         except Exception as e:
@@ -316,8 +315,4 @@ def run_chatbot_app():
 # ==========================================================
 # === TITIK MASUK APLIKASI (TIDAK BERUBAH) ===
 # ==========================================================
-
-# Panggil fungsi login_form() sebagai hal pertama.
-# Fungsi ini akan memutuskan apakah akan menampilkan form login
-# atau menjalankan run_chatbot_app().
 login_form()
