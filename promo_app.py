@@ -73,95 +73,97 @@ def get_database_df(_gc, sheet_key):
 
 def get_ai_response(prompt: str, df_database: pd.DataFrame):
     """
-    Fungsi "Otak AI" UTAMA (YANG DIPERBAIKI).
-    Sekarang menggunakan logika filtering Python sebelum kirim ke AI.
+    Fungsi Otak AI (Versi Revisi: Hemat TAPI Ramah)
     """
     
-    # --- LANGKAH 1: FILTERING DI PYTHON (HEMAT TOKEN) ---
-    # Kita cari baris yang mengandung kata kunci dari prompt user
+    # --- LANGKAH 1: FILTERING DATA ---
     prompt_lower = prompt.lower()
     keywords = prompt_lower.split()
     
-    # Buat mask pencarian (default False)
+    # Masking pencarian data
     mask = pd.Series([False] * len(df_database))
-    
-    # Cek apakah keyword ada di kolom-kolom penting
-    # (Menggunakan try-except untuk menghindari error jika kolom tidak ada)
-    cols_to_search = ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON']
+    cols_to_search = ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON', 'KEYWORD_PENCARIAN'] # Pastikan kolom ini ada/sesuaikan
     valid_search_cols = [c for c in cols_to_search if c in df_database.columns]
 
     found_keyword = False
     for word in keywords:
-        # Abaikan kata pendek (< 3 huruf) biar tidak terlalu umum
-        if len(word) >= 3:
+        if len(word) >= 3: # Abaikan kata pendek
             for col in valid_search_cols:
-                # Cari kata kunci (case insensitive)
                 mask = mask | df_database[col].str.contains(word, case=False, na=False)
                 found_keyword = True
     
-    # Terapkan filter
+    # Ambil data hasil filter
     if found_keyword:
         df_filtered = df_database[mask]
     else:
-        # Jika prompt terlalu pendek, jangan ambil semua data, kosongkan saja biar AI jawab umum
         df_filtered = pd.DataFrame()
 
-    # Batasi maksimal 5-10 promo saja agar token tidak jebol
+    # Batasi jumlah data biar token aman
     if len(df_filtered) > 8:
         df_filtered = df_filtered.head(8)
 
-    # --- LANGKAH 2: FORMAT DATA KE MARKDOWN ---
-    kolom_relevan = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
-    kolom_valid = [kol for kol in kolom_relevan if kol in df_database.columns]
+    # --- LANGKAH 2: DETEKSI BASA-BASI (AGAR TIDAK KAKU) ---
+    # Jika hasil filter KOSONG, kita cek apakah user cuma menyapa
+    is_greeting = False
+    sapaan_umum = ["halo", "hi", "pagi", "siang", "sore", "malam", "thanks", "makasih", "kozy", "woy", "test"]
     
+    # Cek apakah prompt mengandung kata sapaan saja
+    if df_filtered.empty:
+        # Jika prompt pendek (< 5 kata) DAN mengandung kata sapaan
+        if len(prompt.split()) <= 5 and any(s in prompt_lower for s in sapaan_umum):
+            is_greeting = True
+
+    # --- LANGKAH 3: SIAPKAN DATA BUAT AI ---
+    
+    # Kondisi A: Ada Data Promo -> Kirim Data
     if not df_filtered.empty:
-        db_string = df_filtered[kolom_valid].to_markdown(index=False)
-        status_msg = "(Data ditemukan di database)"
-    else:
-        db_string = "TIDAK ADA DATA PROMO YANG COCOK DENGAN KATA KUNCI USER."
-        status_msg = "(Data tidak ditemukan)"
+        # Format ke Markdown
+        kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
+        valid_cols = [k for k in kolom_tampil if k in df_database.columns]
+        db_string = df_filtered[valid_cols].to_markdown(index=False)
+        instruksi_tambahan = "Jawab berdasarkan data promo di atas. Jika ada Link, format jadi Markdown [Link](url)."
     
-    # Ambil riwayat chat terakhir
+    # Kondisi B: Tidak Ada Data TAPI Sapaan -> Mode Ramah (Tanpa Data)
+    elif is_greeting:
+        db_string = "TIDAK PERLU DATA DATABASE UNTUK SAPAAN INI."
+        instruksi_tambahan = "User hanya menyapa/basa-basi. JANGAN cari promo. Jawab sapaan dengan ramah, santai, dan profesional sebagai sesama rekan kerja. Tawarkan bantuan."
+        
+    # Kondisi C: Tidak Ada Data DAN Bukan Sapaan -> Mode "Maaf"
+    else:
+        db_string = "TIDAK DITEMUKAN DATA YANG COCOK."
+        instruksi_tambahan = f"User mencari '{prompt}' tapi data tidak ditemukan di database. Katakan maaf secara sopan, dan sarankan hubungi SPV/Finrep. Jangan halusinasi."
+
+    # --- LANGKAH 4: PROMPT FINAL ---
+    # History chat (Penting biar nyambung)
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
-        for msg in st.session_state.messages[-4:] 
+        for msg in st.session_state.messages[-3:] 
     ])
 
-    # Konfigurasi Model (Menggunakan Flash agar hemat)
-    model = genai.GenerativeModel("models/gemini-2.5-flash") # Update ke model terbaru/flash
+    model = genai.GenerativeModel("models/gemini-2.5-flash") # Tetap pakai Flash
     
-    # --- LANGKAH 3: PROMPT (TIDAK BERUBAH SECARA ESENSI) ---
     gemini_prompt = f"""
-    Kamu adalah Kozy, asisten kasir internal AZKO. Nada bicaramu ramah, percaya diri, dan to-the-point.
+    Kamu adalah Kozy, asisten kasir internal AZKO. 
+    
+    KONTEKS SAAT INI:
+    {instruksi_tambahan}
 
-    TUGAS:
-    Jawab pertanyaan User ("{prompt}") berdasarkan DATA TERFILTER berikut.
-
-    ---
-    DATA PROMO TERFILTER:
+    DATA (Jika ada):
     {db_string}
-    ---
+
     RIWAYAT CHAT:
     {history}
-    ---
 
-    ATURAN:
-    1. Jika data ada di tabel di atas, jelaskan detailnya (Nama, Bank, Diskon, Syarat).
-    2. Jika kolom 'DETAIL_DISKON' berisi Link/URL, WAJIB tampilkan format: `[Klik Detail Disini](URL)`.
-    3. Jika data KOSONG/TIDAK ADA di tabel terfilter:
-       - Katakan: "Maaf, aku cek database belum nemu info soal '{prompt}'."
-       - Sarankan hubungi SPV/Finrep.
-       - Jangan mengarang promo yang tidak ada.
+    PERTANYAAN BARU: "{prompt}"
     
-    Jawaban Kozy:
+    Jawablah pertanyaan baru user sesuai instruksi di atas.
     """
 
     try:
         response = model.generate_content(gemini_prompt)
         return response.text.strip()
     except Exception as e:
-        st.error(f"Error dari API Gemini: {e}")
-        return "Duh, maaf, Kozy lagi agak error nih. Coba tanya lagi ya."
+        return "Duh, sinyal Kozy lagi putus-putus nih. Tanya lagi dong."
 
 # ==========================================================
 # === APLIKASI CHATBOT UTAMA (STRUKTUR TETAP) ===
