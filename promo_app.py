@@ -1,4 +1,3 @@
-import re
 import os
 import streamlit as st
 import gspread
@@ -9,20 +8,11 @@ import google.generativeai as genai
 # === FUNGSI LOGIN (TIDAK BERUBAH) ===
 # ==========================================================
 def login_form():
-    """
-    Menampilkan form login dan mengautentikasi pengguna.
-    Menggunakan st.secrets untuk kredensial yang aman.
-    """
-    
-    # Inisialisasi session state untuk status login
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
-    # Jika pengguna sudah login, langsung jalankan aplikasi utama
     if st.session_state.authenticated:
         run_chatbot_app()
-    
-    # Jika pengguna belum login, tampilkan form
     else:
         st.set_page_config(page_title="Login - Kozy", page_icon="🔒", layout="centered")
         st.title("🔒 Silakan Login")
@@ -34,7 +24,6 @@ def login_form():
             submitted = st.form_submit_button("Login")
 
             if submitted:
-                # Cek kredensial dari Streamlit Secrets
                 try:
                     correct_user = st.secrets["app_credentials"]["APP_USER"]
                     correct_pass = st.secrets["app_credentials"]["APP_PASS"]
@@ -45,16 +34,15 @@ def login_form():
                     st.error(f"Error saat membaca secrets: {e}")
                     return
 
-                # Verifikasi login
                 if username == correct_user and password == correct_pass:
                     st.session_state.authenticated = True
                     st.success("Login berhasil! Memuat aplikasi...")
-                    st.rerun() # Muat ulang halaman (penting!)
+                    st.rerun()
                 else:
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: PAKAI FILTERING) ===
+# === "OTAK AI" (DIPERBAIKI: DIBUAT LUWES SEPERTI PC BOT) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key): 
@@ -62,10 +50,6 @@ def get_database_df(_gc, sheet_key):
     try:
         sheet = _gc.open_by_key(sheet_key).worksheet("promo") 
         df = pd.DataFrame(sheet.get_all_records())
-        # Pastikan kolom penting adalah string dan LOWERCASE untuk memudahkan pencarian
-        for col in ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON', 'SYARAT_UTAMA']:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
         return df
     except Exception as e:
         st.error(f"❌ Gagal memuat data Sheets. Error: {e}")
@@ -73,90 +57,42 @@ def get_database_df(_gc, sheet_key):
 
 def get_ai_response(prompt: str, df_database: pd.DataFrame):
     """
-    Fungsi Otak AI (Versi Revisi: Hemat TAPI Ramah)
+    Fungsi Otak AI (Versi Revisi: Serahkan pencarian 100% pada Gemini)
     """
+    # 1. Pilih kolom yang penting saja untuk menghemat token
+    kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
+    valid_cols = [k for k in kolom_tampil if k in df_database.columns]
     
-    # --- LANGKAH 1: FILTERING DATA ---
-    prompt_lower = prompt.lower()
-    keywords = prompt_lower.split()
-    
-    # Masking pencarian data
-    mask = pd.Series([False] * len(df_database))
-    cols_to_search = ['NAMA_PROMO', 'BANK_PARTNER', 'DETAIL_DISKON', 'KEYWORD_PENCARIAN'] # Pastikan kolom ini ada/sesuaikan
-    valid_search_cols = [c for c in cols_to_search if c in df_database.columns]
+    # 2. Ubah data menjadi CSV (lebih hemat token dari Markdown)
+    db_string = df_database[valid_cols].to_csv(index=False)
 
-    found_keyword = False
-    for word in keywords:
-        if len(word) >= 3: # Abaikan kata pendek
-            for col in valid_search_cols:
-                mask = mask | df_database[col].str.contains(word, case=False, na=False)
-                found_keyword = True
-    
-    # Ambil data hasil filter
-    if found_keyword:
-        df_filtered = df_database[mask]
-    else:
-        df_filtered = pd.DataFrame()
-
-    # Batasi jumlah data biar token aman
-    if len(df_filtered) > 8:
-        df_filtered = df_filtered.head(8)
-
-    # --- LANGKAH 2: DETEKSI BASA-BASI (AGAR TIDAK KAKU) ---
-    # Jika hasil filter KOSONG, kita cek apakah user cuma menyapa
-    is_greeting = False
-    sapaan_umum = ["halo", "hi", "pagi", "siang", "sore", "malam", "thanks", "makasih", "kozy", "woy", "test"]
-    
-    # Cek apakah prompt mengandung kata sapaan saja
-    if df_filtered.empty:
-        # Jika prompt pendek (< 5 kata) DAN mengandung kata sapaan
-        if len(prompt.split()) <= 5 and any(s in prompt_lower for s in sapaan_umum):
-            is_greeting = True
-
-    # --- LANGKAH 3: SIAPKAN DATA BUAT AI ---
-    
-    # Kondisi A: Ada Data Promo -> Kirim Data
-    if not df_filtered.empty:
-        # Format ke Markdown
-        kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
-        valid_cols = [k for k in kolom_tampil if k in df_database.columns]
-        db_string = df_filtered[valid_cols].to_markdown(index=False)
-        instruksi_tambahan = "Jawab berdasarkan data promo di atas. Jika ada Link, format jadi Markdown [Link](url)."
-    
-    # Kondisi B: Tidak Ada Data TAPI Sapaan -> Mode Ramah (Tanpa Data)
-    elif is_greeting:
-        db_string = "TIDAK PERLU DATA DATABASE UNTUK SAPAAN INI."
-        instruksi_tambahan = "User hanya menyapa/basa-basi. JANGAN cari promo. Jawab sapaan dengan ramah, santai, dan profesional sebagai sesama rekan kerja. Tawarkan bantuan."
-        
-    # Kondisi C: Tidak Ada Data DAN Bukan Sapaan -> Mode "Maaf"
-    else:
-        db_string = "TIDAK DITEMUKAN DATA YANG COCOK."
-        instruksi_tambahan = f"User mencari '{prompt}' tapi data tidak ditemukan di database. Katakan maaf secara sopan, dan sarankan hubungi SPV/Finrep. Jangan halusinasi."
-
-    # --- LANGKAH 4: PROMPT FINAL ---
-    # History chat (Penting biar nyambung)
+    # 3. Siapkan riwayat chat agar AI ingat percakapan sebelumnya
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
         for msg in st.session_state.messages[-3:] 
     ])
 
-    model = genai.GenerativeModel("models/gemini-2.5-flash") # Tetap pakai Flash
+    # 4. Inisialisasi Model
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
     
+    # 5. Prompt Super Pintar
     gemini_prompt = f"""
-    Kamu adalah Kozy, asisten kasir internal AZKO. 
+    Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
     
-    KONTEKS SAAT INI:
-    {instruksi_tambahan}
-
-    DATA (Jika ada):
+    DATABASE PROMO AZKO SAAT INI:
     {db_string}
 
     RIWAYAT CHAT:
     {history}
 
-    PERTANYAAN BARU: "{prompt}"
+    PERTANYAAN BARU USER: "{prompt}"
     
-    Jawablah pertanyaan baru user sesuai instruksi di atas.
+    INSTRUKSI KERJA (WAJIB DIIKUTI):
+    1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan untuk mengecek promo. JANGAN tampilkan data promo jika tidak diminta.
+    2. Jika user MENCARI promo (misal menyebutkan nama bank BCA, Mandiri, atau barang), cari kecocokannya di DATABASE PROMO di atas.
+    3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
+    4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini. (OPSIONAL: Tawarkan alternatif promo dari bank lain yang ada di database).
+    5. DILARANG KERAS mengarang/menghalusinasi promo yang tidak ada di dalam database.
     """
 
     try:
@@ -169,10 +105,6 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame):
 # === APLIKASI CHATBOT UTAMA (STRUKTUR TETAP) ===
 # ==========================================================
 def run_chatbot_app():
-    """
-    Ini adalah kode aplikasi chatbot Anda.
-    """
-
     # --- KONFIGURASI API DAN SHEETS ---
     API_KEY = (
         st.secrets.get("GEMINI_API_KEY")
@@ -274,18 +206,15 @@ def run_chatbot_app():
 
     st.markdown("---") # Garis pemisah visual
 
-
     # --- STATE INISIALISASI ---
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {"role": "assistant", "content": "Halo! Aku Kozy, asisten promo internal AZKO. Ada info promo apa yang kamu butuh? 🧐"}
         ]
-    # Hapus state lama yang tidak perlu
     if "context" in st.session_state:
         del st.session_state["context"]
     if "last_intent" in st.session_state:
         del st.session_state["last_intent"]
-
 
     # --- UI CHAT ---
     for msg in st.session_state.messages:
@@ -301,7 +230,6 @@ def run_chatbot_app():
         # 2. Panggil "Otak AI"
         try:
             with st.spinner("Kozy lagi mikir..."):
-                # PANGGILAN FUNGSI YANG SUDAH KITA PERBAIKI DI ATAS
                 answer = get_ai_response(prompt, df_original) 
         
         except Exception as e:
@@ -312,7 +240,6 @@ def run_chatbot_app():
         with st.chat_message("assistant"):
             st.markdown(answer)
         st.session_state.messages.append({"role": "assistant", "content": answer})
-
 
 # ==========================================================
 # === TITIK MASUK APLIKASI (TIDAK BERUBAH) ===
