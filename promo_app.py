@@ -42,7 +42,7 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: PENAMBAHAN DISCLAIMER FINREP AREA) ===
+# === "OTAK AI" (DIPERBAIKI: ATURAN MUTLAK CICILAN) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key, worksheet_name): 
@@ -59,16 +59,15 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     """
     Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
-    # 1. Pilih kolom (Untuk MOP, kita ambil semua kolom agar aman dari typo/spasi di judul header Sheets)
+    # 1. Pilih kolom 
     if kategori_pilihan == "Tanya Promo":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
         db_string = df_database[valid_cols].to_csv(index=False)
-    else: # Kategori MOP
-        # Ambil semua data apa adanya, jangan di-filter nama kolomnya
+    else: 
         db_string = df_database.to_csv(index=False)
 
-    # 3. Siapkan riwayat chat agar AI ingat percakapan sebelumnya
+    # 3. Siapkan riwayat chat 
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
         for msg in st.session_state.messages[-3:] 
@@ -77,7 +76,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     # 4. Inisialisasi Model
     model = genai.GenerativeModel("models/gemini-2.5-flash")
     
-    # 5. Prompt Super Pintar (Disetel untuk Hybrid)
+    # 5. Prompt Super Pintar 
     if kategori_pilihan == "Tanya Promo":
         instruksi_khusus = """
     2. Cari kecocokannya di DATABASE PROMO di atas.
@@ -87,19 +86,18 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
         """
     else:
         instruksi_khusus = """
-    2. TUGAS UTAMA (PERTANYAAN NORMAL): 
+    2. ATURAN MUTLAK SOAL CICILAN (OVERRIDE): Jika pertanyaan user mengandung kata "cicil" atau "cicilan", BATALKAN semua pencarian instruksi dari database. JANGAN berikan nama EDC atau MOP pengganti sama sekali karena ini sangat berisiko untuk customer. Langsung berikan jawaban yang ramah bahwa untuk kendala mesin terkait transaksi cicilan atau pengajuan cicilan manual, kasir harus melapor ke atasan, lalu AKHIRI DENGAN KALIMAT PERSIS INI: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
+    3. TUGAS UTAMA (PERTANYAAN NORMAL BUKAN CICILAN): 
        - Jika user menyebutkan nama bank tapi TIDAK MENYEBUTKAN jenis transaksinya (Debit/Kredit/QR), JANGAN ASUMSI HANYA SATU JENIS. 
        - Carilah SEMUA baris (Debit, Kredit, QR) yang berkaitan dengan bank tersebut (jika tidak ada spesifik, cek kategori 'BANK LAIN').
        - Rangkum jawabannya dengan menyebutkan "EDC Yang digunakan" dan "Pilihan MOP Sesuai Type" untuk MASING-MASING jenis transaksi (Debit dan Kredit) agar kasir tahu semua opsinya.
        - Jika user SUDAH menyebutkan jenis transaksinya secara spesifik (misal: "debit bca"), barulah jawab untuk jenis itu saja.
-    3. SKENARIO ERROR/GANGGUAN (PENTING!):
-       - Jika user bertanya tentang solusi saat EDC gangguan/error untuk suatu bank (contoh: "kalau edc bca eror pakai apa?"), JANGAN HANYA MENCARI SATU BARIS.
+    4. SKENARIO ERROR/GANGGUAN (BUKAN CICILAN):
+       - Jika user bertanya tentang solusi saat EDC gangguan/error untuk suatu bank, JANGAN HANYA MENCARI SATU BARIS.
        - Carilah SEMUA baris di database (seperti Kartu Debit, Kartu Kredit, atau QR) yang berkaitan dengan bank tersebut.
        - BACA instruksi pengganti yang ada di kolom yang berisi kata 'NOTE' pada masing-masing baris tersebut.
        - Rangkum jawabannya dengan gaya bahasa yang luwes dan interaktif seperti asisten sungguhan.
-       - Contoh Format Jawaban Luwes: "Waduh, EDC BCA lagi gangguan ya? Tenang! Kasir bisa pakai mesin alternatif ini:\n- Untuk Debit: [Isi dari kolom NOTE baris Debit BCA]\n- Untuk Kredit: [Isi dari kolom NOTE baris Kredit BCA]"
-    4. Jika di kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
-    5. ATURAN WAJIB CICILAN: Jika pertanyaan user menyinggung soal "cicil" atau "cicilan", di akhir jawabanmu kamu WAJIB menambahkan kalimat persis seperti ini: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
+    5. Jika di kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
         """
 
     gemini_prompt = f"""
@@ -117,7 +115,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     INSTRUKSI KERJA (WAJIB DIIKUTI):
     1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan sesuai kategori yang dipilih.
     {instruksi_khusus}
-    5. DILARANG KERAS mengarang/menghalusinasi data yang tidak ada di dalam database.
+    6. DILARANG KERAS mengarang/menghalusinasi data yang tidak ada di dalam database.
     """
 
     try:
