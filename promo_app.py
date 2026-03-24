@@ -42,25 +42,29 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: DIBUAT LUWES SEPERTI PC BOT) ===
+# === "OTAK AI" (DIPERBAIKI: PENAMBAHAN LOGIKA HYBRID PROMO & MOP) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
-def get_database_df(_gc, sheet_key): 
-    """Mengambil dan men-cache DataFrame dari Google Sheets."""
+def get_database_df(_gc, sheet_key, worksheet_name): 
+    """Mengambil dan men-cache DataFrame dari Google Sheets berdasarkan nama worksheet."""
     try:
-        sheet = _gc.open_by_key(sheet_key).worksheet("promo") 
+        sheet = _gc.open_by_key(sheet_key).worksheet(worksheet_name) 
         df = pd.DataFrame(sheet.get_all_records())
         return df
     except Exception as e:
-        st.error(f"❌ Gagal memuat data Sheets. Error: {e}")
+        st.error(f"❌ Gagal memuat data Sheets '{worksheet_name}'. Error: {e}")
         st.stop()
 
-def get_ai_response(prompt: str, df_database: pd.DataFrame):
+def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str):
     """
-    Fungsi Otak AI (Versi Revisi: Serahkan pencarian 100% pada Gemini)
+    Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
-    # 1. Pilih kolom yang penting saja untuk menghemat token
-    kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
+    # 1. Pilih kolom yang penting saja untuk menghemat token berdasarkan kategori
+    if kategori_pilihan == "Tanya Promo":
+        kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
+    else: # Kategori MOP
+        kolom_tampil = ['Type', 'Partner', 'Mesin EDC yg Digunakan', 'Pilihan MOP Sesuai Type', 'NOTE']
+
     valid_cols = [k for k in kolom_tampil if k in df_database.columns]
     
     # 2. Ubah data menjadi CSV (lebih hemat token dari Markdown)
@@ -75,11 +79,25 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame):
     # 4. Inisialisasi Model
     model = genai.GenerativeModel("models/gemini-2.5-flash")
     
-    # 5. Prompt Super Pintar
+    # 5. Prompt Super Pintar (Disetel untuk Hybrid)
+    if kategori_pilihan == "Tanya Promo":
+        instruksi_khusus = """
+    2. Cari kecocokannya di DATABASE PROMO di atas.
+    3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
+    4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini.
+        """
+    else:
+        instruksi_khusus = """
+    2. Cari panduan pembayaran/mesin EDC di DATABASE MOP di atas berdasarkan pertanyaan kasir.
+    3. Jika user menanyakan solusi saat mesin EDC error/gangguan: Periksa kolom 'NOTE'. Jika kolom NOTE berisi instruksi khusus, ikuti. Namun JIKA KOLOM NOTE KOSONG/TIDAK ADA, arahkan kasir untuk menggunakan panduan mesin EDC Utama sesuai Tipe pembayarannya: Rujuk ke Baris 1 untuk QR, Baris 2 untuk Debit, dan Baris 3 untuk Kredit.
+    4. Berikan jawaban yang singkat, padat, dan jelas mengenai nama Mesin EDC dan Pilihan MOP yang harus ditekan kasir di sistem POS.
+        """
+
     gemini_prompt = f"""
     Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
+    Konteks saat ini: Kasir sedang bertanya seputar {kategori_pilihan}.
     
-    DATABASE PROMO AZKO SAAT INI:
+    DATABASE SAAT INI:
     {db_string}
 
     RIWAYAT CHAT:
@@ -88,11 +106,9 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame):
     PERTANYAAN BARU USER: "{prompt}"
     
     INSTRUKSI KERJA (WAJIB DIIKUTI):
-    1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan untuk mengecek promo. JANGAN tampilkan data promo jika tidak diminta.
-    2. Jika user MENCARI promo (misal menyebutkan nama bank BCA, Mandiri, atau barang), cari kecocokannya di DATABASE PROMO di atas.
-    3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
-    4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini. (OPSIONAL: Tawarkan alternatif promo dari bank lain yang ada di database).
-    5. DILARANG KERAS mengarang/menghalusinasi promo yang tidak ada di dalam database.
+    1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan sesuai kategori yang dipilih.
+    {instruksi_khusus}
+    5. DILARANG KERAS mengarang/menghalusinasi data yang tidak ada di dalam database.
     """
 
     try:
@@ -102,7 +118,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame):
         return "Duh, sinyal Kozy lagi putus-putus nih. Tanya lagi dong."
 
 # ==========================================================
-# === APLIKASI CHATBOT UTAMA (STRUKTUR TETAP) ===
+# === APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
     # --- KONFIGURASI API DAN SHEETS ---
@@ -132,9 +148,6 @@ def run_chatbot_app():
     if not SHEET_KEY:
         st.error("Tambahkan 'SHEET_KEY' di Streamlit Secrets.")
         st.stop()
-
-    # --- AMBIL DATA DARI G-SHEET ---
-    df_original = get_database_df(gc, SHEET_KEY)
 
     # --- KONFIGURASI HALAMAN ---
     st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
@@ -186,6 +199,11 @@ def run_chatbot_app():
         hr {
             border-top: 1px solid #BF1E2D40; /* Merah transparan */
         }
+        /* Tambahan untuk Radio Button agar rapi */
+        div.row-widget.stRadio > div {
+            flex-direction: row;
+            justify-content: center;
+        }
         </style>
         """,
         unsafe_allow_html=True
@@ -206,11 +224,30 @@ def run_chatbot_app():
 
     st.markdown("---") # Garis pemisah visual
 
+    # ==========================================================
+    # === FITUR BARU: PILIHAN HYBRID KATEGORI (PROMO / MOP) ===
+    # ==========================================================
+    kategori_pilihan = st.radio(
+        "Pilih kategori bantuan yang dibutuhkan:",
+        ("Tanya Promo", "Tanya Panduan MOP & EDC"),
+        horizontal=True
+    )
+
+    # --- AMBIL DATA DARI G-SHEET BERDASARKAN KATEGORI ---
+    if kategori_pilihan == "Tanya Promo":
+        df_active = get_database_df(gc, SHEET_KEY, "promo")
+        placeholder_text = "Ketik info promo yang dicari..."
+    else:
+        df_active = get_database_df(gc, SHEET_KEY, "MOP") # Pastikan nama sheet di G-Sheet benar-benar "MOP"
+        placeholder_text = "Tanya soal mesin EDC atau MOP di sini..."
+
     # --- STATE INISIALISASI ---
     if "messages" not in st.session_state:
         st.session_state.messages = [
-            {"role": "assistant", "content": "Halo! Aku Kozy, asisten promo internal AZKO. Ada info promo apa yang kamu butuh? 🧐"}
+            {"role": "assistant", "content": "Halo! Aku Kozy. Silakan pilih kategori di atas, lalu ketik pertanyaanmu di bawah ya! 🧐"}
         ]
+    
+    # Hapus context/intent lama jika ada (Sesuai kode asli)
     if "context" in st.session_state:
         del st.session_state["context"]
     if "last_intent" in st.session_state:
@@ -222,15 +259,15 @@ def run_chatbot_app():
             st.markdown(msg["content"])
 
     # --- INPUT CHAT ---
-    if prompt := st.chat_input("Ketik info promo yang dicari..."):
+    if prompt := st.chat_input(placeholder_text):
         # 1. Tampilkan pertanyaan user
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
 
-        # 2. Panggil "Otak AI"
+        # 2. Panggil "Otak AI" dengan menyertakan Kategori
         try:
             with st.spinner("Kozy lagi mikir..."):
-                answer = get_ai_response(prompt, df_original) 
+                answer = get_ai_response(prompt, df_active, kategori_pilihan) 
         
         except Exception as e:
             st.error(f"Duh, ada error: {e}")
