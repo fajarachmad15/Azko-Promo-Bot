@@ -42,7 +42,7 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: PENAMBAHAN LOGIKA AMBIGU TIPE PEMBAYARAN) ===
+# === "OTAK AI" (LOGIKA AMBIGU TIPE PEMBAYARAN TETAP ADA) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key, worksheet_name): 
@@ -59,16 +59,15 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     """
     Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
-    # 1. Pilih kolom (Untuk MOP, kita ambil semua kolom agar aman dari typo/spasi di judul header Sheets)
+    # 1. Pilih kolom 
     if kategori_pilihan == "Tanya Promo":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
         db_string = df_database[valid_cols].to_csv(index=False)
-    else: # Kategori MOP
-        # Ambil semua data apa adanya, jangan di-filter nama kolomnya
+    else: 
         db_string = df_database.to_csv(index=False)
 
-    # 3. Siapkan riwayat chat agar AI ingat percakapan sebelumnya
+    # 3. Siapkan riwayat chat 
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
         for msg in st.session_state.messages[-3:] 
@@ -77,7 +76,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     # 4. Inisialisasi Model
     model = genai.GenerativeModel("models/gemini-2.5-flash")
     
-    # 5. Prompt Super Pintar (Disetel untuk Hybrid)
+    # 5. Prompt Super Pintar 
     if kategori_pilihan == "Tanya Promo":
         instruksi_khusus = """
     2. Cari kecocokannya di DATABASE PROMO di atas.
@@ -165,48 +164,40 @@ def run_chatbot_app():
     st.markdown(
         """
         <style>
-        /* 1. Mengatur lebar container utama */
         .css-1d391kg {
-            max-width: 700px; /* Lebar lebih nyaman untuk chat */
+            max-width: 700px; 
             padding-left: 1rem;
             padding-right: 1rem;
         }
-        /* 2. Mengubah warna Primary Streamlit (Warna Merah AZKO: #BF1E2D) */
         :root {
             --primary-color: #BF1E2D; 
         }
-        /* 3. Mengubah Header dan Font */
         h1, h2, h3, h4, .stApp {
-            font-family: 'Poppins', sans-serif; /* Ganti font agar lebih modern */
+            font-family: 'Poppins', sans-serif; 
         }
-        /* 4. Mengubah warna ikon dan tombol KIRIM menjadi Merah AZKO */
         .stButton > button, .stTextInput > div > div > button {
             background-color: var(--primary-color) !important;
             color: white !important;
             border: none;
         }
-        /* 5. Mengubah warna notifikasi Peringatan (Warning) menjadi Kuning/Oranye */
         .stAlert.stWarning {
-            background-color: #FFA50040; /* Oranye muda transparan */
-            border-left: 5px solid #FFC300; /* Oranye gelap */
+            background-color: #FFA50040; 
+            border-left: 5px solid #FFC300; 
             color: #FFC300;
         }
         .stAlert.stWarning p {
-            color: white; /* Agar teks di mode gelap tetap terbaca */
+            color: white; 
         }
-        /* 6. Mempercantik Chat Input */
         .stTextInput {
             border-radius: 0.75rem;
         }
         .stTextInput > div > div > input {
             border-radius: 0.75rem;
-            border: 1px solid #BF1E2D; /* Border merah di input */
+            border: 1px solid #BF1E2D; 
         }
-        /* 7. Memperjelas pemisah/garis */
         hr {
-            border-top: 1px solid #BF1E2D40; /* Merah transparan */
+            border-top: 1px solid #BF1E2D40; 
         }
-        /* Tambahan untuk Radio Button agar rapi */
         div.row-widget.stRadio > div {
             flex-direction: row;
             justify-content: center;
@@ -232,58 +223,67 @@ def run_chatbot_app():
     st.markdown("---") # Garis pemisah visual
 
     # ==========================================================
-    # === FITUR BARU: PILIHAN HYBRID KATEGORI (PROMO / MOP) ===
+    # === FITUR BARU: WAJIB PILIH KATEGORI (INDEX=NONE) ===
     # ==========================================================
     kategori_pilihan = st.radio(
         "Pilih kategori bantuan yang dibutuhkan:",
         ("Tanya Promo", "Tanya Panduan MOP & EDC"),
-        horizontal=True
+        horizontal=True,
+        index=None # <-- INI FITUR YANG HILANG DI CODINGMU, SAYA KEMBALIKAN
     )
 
-    # --- AMBIL DATA DARI G-SHEET BERDASARKAN KATEGORI ---
-    if kategori_pilihan == "Tanya Promo":
-        df_active = get_database_df(gc, SHEET_KEY, "promo")
-        placeholder_text = "Ketik info promo yang dicari..."
+    # ==========================================================
+    # === LOGIKA TAMPILAN BERSYARAT (KOLOM CHAT DIUMPETIN) ===
+    # ==========================================================
+    if kategori_pilihan is None:
+        # Tampilkan pesan statis jika belum memilih
+        st.info("👆 Silakan pilih kategori bantuan di atas terlebih dahulu untuk memulai obrolan dengan Kozy.")
     else:
-        df_active = get_database_df(gc, SHEET_KEY, "MOP") # Pastikan nama sheet di G-Sheet benar-benar "MOP"
-        placeholder_text = "Tanya soal mesin EDC atau MOP di sini..."
-
-    # --- STATE INISIALISASI ---
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "Halo! Aku Kozy. Silakan pilih kategori di atas, lalu ketik pertanyaanmu di bawah ya! 🧐"}
-        ]
-    
-    # Hapus context/intent lama jika ada (Sesuai kode asli)
-    if "context" in st.session_state:
-        del st.session_state["context"]
-    if "last_intent" in st.session_state:
-        del st.session_state["last_intent"]
-
-    # --- UI CHAT ---
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-    # --- INPUT CHAT ---
-    if prompt := st.chat_input(placeholder_text):
-        # 1. Tampilkan pertanyaan user
-        st.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
-
-        # 2. Panggil "Otak AI" dengan menyertakan Kategori
-        try:
-            with st.spinner("Kozy lagi mikir..."):
-                answer = get_ai_response(prompt, df_active, kategori_pilihan) 
+        # Jika sudah milih, baru jalankan semua logika chat
         
-        except Exception as e:
-            st.error(f"Duh, ada error: {e}")
-            answer = "Maaf, lagi ada gangguan. Coba lagi ya."
+        # --- AMBIL DATA DARI G-SHEET BERDASARKAN KATEGORI ---
+        if kategori_pilihan == "Tanya Promo":
+            df_active = get_database_df(gc, SHEET_KEY, "promo")
+            placeholder_text = "Ketik info promo yang dicari..."
+        else:
+            df_active = get_database_df(gc, SHEET_KEY, "MOP") 
+            placeholder_text = "Tanya soal mesin EDC atau MOP di sini..."
 
-        # 3. Tampilkan jawaban AI
-        with st.chat_message("assistant"):
-            st.markdown(answer)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+        # --- STATE INISIALISASI ---
+        if "messages" not in st.session_state:
+            st.session_state.messages = [
+                {"role": "assistant", "content": "Halo! Aku Kozy. Silakan ketik pertanyaanmu di bawah ya! 🧐"}
+            ]
+        
+        if "context" in st.session_state:
+            del st.session_state["context"]
+        if "last_intent" in st.session_state:
+            del st.session_state["last_intent"]
+
+        # --- UI CHAT ---
+        for msg in st.session_state.messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+        # --- INPUT CHAT ---
+        if prompt := st.chat_input(placeholder_text):
+            # 1. Tampilkan pertanyaan user
+            st.chat_message("user").markdown(prompt)
+            st.session_state.messages.append({"role": "user", "content": prompt})
+
+            # 2. Panggil "Otak AI" dengan menyertakan Kategori
+            try:
+                with st.spinner("Kozy lagi mikir..."):
+                    answer = get_ai_response(prompt, df_active, kategori_pilihan) 
+            
+            except Exception as e:
+                st.error(f"Duh, ada error: {e}")
+                answer = "Maaf, lagi ada gangguan. Coba lagi ya."
+
+            # 3. Tampilkan jawaban AI
+            with st.chat_message("assistant"):
+                st.markdown(answer)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
 
 # ==========================================================
 # === TITIK MASUK APLIKASI (TIDAK BERUBAH) ===
