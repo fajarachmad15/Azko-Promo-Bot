@@ -42,7 +42,7 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (LOGIKA AMBIGU TIPE PEMBAYARAN TETAP ADA) ===
+# === "OTAK AI" (DIPERBAIKI: PENAMBAHAN DISCLAIMER FINREP AREA) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key, worksheet_name): 
@@ -59,15 +59,16 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     """
     Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
-    # 1. Pilih kolom 
+    # 1. Pilih kolom (Untuk MOP, kita ambil semua kolom agar aman dari typo/spasi di judul header Sheets)
     if kategori_pilihan == "Tanya Promo":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
         db_string = df_database[valid_cols].to_csv(index=False)
-    else: 
+    else: # Kategori MOP
+        # Ambil semua data apa adanya, jangan di-filter nama kolomnya
         db_string = df_database.to_csv(index=False)
 
-    # 3. Siapkan riwayat chat 
+    # 3. Siapkan riwayat chat agar AI ingat percakapan sebelumnya
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
         for msg in st.session_state.messages[-3:] 
@@ -76,12 +77,13 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     # 4. Inisialisasi Model
     model = genai.GenerativeModel("models/gemini-2.5-flash")
     
-    # 5. Prompt Super Pintar 
+    # 5. Prompt Super Pintar (Disetel untuk Hybrid)
     if kategori_pilihan == "Tanya Promo":
         instruksi_khusus = """
     2. Cari kecocokannya di DATABASE PROMO di atas.
     3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
     4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini.
+    5. ATURAN WAJIB: Di akhir SETIAP jawabanmu mengenai promo (baik promo itu ada maupun tidak ada), kamu WAJIB menambahkan kalimat persis seperti ini: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
         """
     else:
         instruksi_khusus = """
@@ -97,6 +99,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
        - Rangkum jawabannya dengan gaya bahasa yang luwes dan interaktif seperti asisten sungguhan.
        - Contoh Format Jawaban Luwes: "Waduh, EDC BCA lagi gangguan ya? Tenang! Kasir bisa pakai mesin alternatif ini:\n- Untuk Debit: [Isi dari kolom NOTE baris Debit BCA]\n- Untuk Kredit: [Isi dari kolom NOTE baris Kredit BCA]"
     4. Jika di kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
+    5. ATURAN WAJIB CICILAN: Jika pertanyaan user menyinggung soal "cicil" atau "cicilan", di akhir jawabanmu kamu WAJIB menambahkan kalimat persis seperti ini: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
         """
 
     gemini_prompt = f"""
@@ -229,7 +232,7 @@ def run_chatbot_app():
         "Pilih kategori bantuan yang dibutuhkan:",
         ("Tanya Promo", "Tanya Panduan MOP & EDC"),
         horizontal=True,
-        index=None # <-- INI FITUR YANG HILANG DI CODINGMU, SAYA KEMBALIKAN
+        index=None 
     )
 
     # ==========================================================
