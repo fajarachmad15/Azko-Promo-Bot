@@ -88,9 +88,13 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
         """
     else:
         instruksi_khusus = """
-    2. Cari panduan pembayaran/mesin EDC di DATABASE MOP di atas berdasarkan pertanyaan kasir.
-    3. Jika user menanyakan solusi saat mesin EDC error/gangguan: Periksa kolom 'NOTE'. Jika kolom NOTE berisi instruksi khusus, ikuti. Namun JIKA KOLOM NOTE KOSONG/TIDAK ADA, arahkan kasir untuk menggunakan panduan mesin EDC Utama sesuai Tipe pembayarannya: Rujuk ke Baris 1 untuk QR, Baris 2 untuk Debit, dan Baris 3 untuk Kredit.
-    4. Berikan jawaban yang singkat, padat, dan jelas mengenai nama Mesin EDC dan Pilihan MOP yang harus ditekan kasir di sistem POS.
+    2. Cari nama bank atau partner pembayaran di DATABASE MOP.
+    3. ATURAN MUTLAK JIKA MESIN EDC ERROR/GANGGUAN: 
+       - Cari baris data yang sesuai dengan bank/partner yang ditanyakan user.
+       - BACA KOLOM 'NOTE' pada baris tersebut.
+       - JAWABANMU HARUS SAMA PERSIS dengan teks yang ada di dalam kolom 'NOTE' tersebut. JANGAN MENGAMBIL DATA DARI KOLOM LAIN ('Partner', 'Mesin EDC yg Digunakan', atau 'Pilihan MOP Sesuai Type').
+       - Contoh: Jika user tanya "Debit BCA error", cari baris BCA (Type: Kartu Debit), lihat kolom NOTE-nya, lalu jawab: "Jika EDC gangguan, gunakan EDC PRIMAVISTA dengan MOP PRIMA DEBIT OFF US."
+    4. Jika pertanyaan NORMAL (TIDAK ERROR): Sebutkan 'Mesin EDC yg Digunakan' dan 'Pilihan MOP Sesuai Type' secara singkat, padat, dan jelas.
         """
 
     gemini_prompt = f"""
