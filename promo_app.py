@@ -42,7 +42,7 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: PROMPT MOP DIBUAT LUWES & MERANGKUM) ===
+# === "OTAK AI" (DIPERBAIKI: PENAMBAHAN LOGIKA AMBIGU TIPE PEMBAYARAN) ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key, worksheet_name): 
@@ -59,16 +59,14 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     """
     Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
-    # 1. Pilih kolom yang penting saja untuk menghemat token berdasarkan kategori
+    # 1. Pilih kolom (Untuk MOP, kita ambil semua kolom agar aman dari typo/spasi di judul header Sheets)
     if kategori_pilihan == "Tanya Promo":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
+        valid_cols = [k for k in kolom_tampil if k in df_database.columns]
+        db_string = df_database[valid_cols].to_csv(index=False)
     else: # Kategori MOP
-        kolom_tampil = ['Type', 'Partner', 'Mesin EDC yg Digunakan', 'Pilihan MOP Sesuai Type', 'NOTE']
-
-    valid_cols = [k for k in kolom_tampil if k in df_database.columns]
-    
-    # 2. Ubah data menjadi CSV (lebih hemat token dari Markdown)
-    db_string = df_database[valid_cols].to_csv(index=False)
+        # Ambil semua data apa adanya, jangan di-filter nama kolomnya
+        db_string = df_database.to_csv(index=False)
 
     # 3. Siapkan riwayat chat agar AI ingat percakapan sebelumnya
     history = "\n".join([
@@ -88,14 +86,18 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
         """
     else:
         instruksi_khusus = """
-    2. TUGAS UTAMA (PERTANYAAN NORMAL): Jika user menanyakan pembayaran mesin EDC normal, jawablah secara interaktif, santai, dan sebutkan "Mesin EDC yg Digunakan" dan "Pilihan MOP Sesuai Type".
+    2. TUGAS UTAMA (PERTANYAAN NORMAL): 
+       - Jika user menyebutkan nama bank tapi TIDAK MENYEBUTKAN jenis transaksinya (Debit/Kredit/QR), JANGAN ASUMSI HANYA SATU JENIS. 
+       - Carilah SEMUA baris (Debit, Kredit, QR) yang berkaitan dengan bank tersebut (jika tidak ada spesifik, cek kategori 'BANK LAIN').
+       - Rangkum jawabannya dengan menyebutkan "EDC Yang digunakan" dan "Pilihan MOP Sesuai Type" untuk MASING-MASING jenis transaksi (Debit dan Kredit) agar kasir tahu semua opsinya.
+       - Jika user SUDAH menyebutkan jenis transaksinya secara spesifik (misal: "debit bca"), barulah jawab untuk jenis itu saja.
     3. SKENARIO ERROR/GANGGUAN (PENTING!):
        - Jika user bertanya tentang solusi saat EDC gangguan/error untuk suatu bank (contoh: "kalau edc bca eror pakai apa?"), JANGAN HANYA MENCARI SATU BARIS.
        - Carilah SEMUA baris di database (seperti Kartu Debit, Kartu Kredit, atau QR) yang berkaitan dengan bank tersebut.
-       - Baca instruksi pengganti yang ada di kolom 'NOTE' pada masing-masing baris tersebut.
+       - BACA instruksi pengganti yang ada di kolom yang berisi kata 'NOTE' pada masing-masing baris tersebut.
        - Rangkum jawabannya dengan gaya bahasa yang luwes dan interaktif seperti asisten sungguhan.
        - Contoh Format Jawaban Luwes: "Waduh, EDC BCA lagi gangguan ya? Tenang! Kasir bisa pakai mesin alternatif ini:\n- Untuk Debit: [Isi dari kolom NOTE baris Debit BCA]\n- Untuk Kredit: [Isi dari kolom NOTE baris Kredit BCA]"
-    4. Jika kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
+    4. Jika di kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
         """
 
     gemini_prompt = f"""
@@ -123,7 +125,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
         return "Duh, sinyal Kozy lagi putus-putus nih. Tanya lagi dong."
 
 # ==========================================================
-# === APLIKASI CHATBOT UTAMA (TIDAK BERUBAH) ===
+# === APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
     # --- KONFIGURASI API DAN SHEETS ---
