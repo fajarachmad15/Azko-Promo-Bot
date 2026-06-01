@@ -228,7 +228,7 @@ def run_chatbot_app():
     # ==========================================================
     kategori_pilihan = st.radio(
         "Pilih kategori bantuan yang dibutuhkan:",
-        ("Tanya Promo", "Tanya Panduan MOP & EDC"),
+        ("Tanya Promo dan Pembayaran", "Kategori MOP & EDC"),
         horizontal=True,
         index=None 
     )
