@@ -74,7 +74,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     ])
 
     # 4. Inisialisasi Model
-    model = genai.GenerativeModel("models/gemini-2.5-flash")
+    model = genai.GenerativeModel("models/gemini-3.1-flash-lite")
     
     # 5. Prompt Super Pintar 
     if kategori_pilihan == "Tanya Promo":
