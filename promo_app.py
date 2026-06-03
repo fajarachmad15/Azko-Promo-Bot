@@ -60,7 +60,8 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     Fungsi Otak AI (Versi Hybrid Promo & MOP)
     """
     # 1. Pilih kolom 
-    if kategori_pilihan == "Tanya Promo":
+    # PERBAIKAN: Menyesuaikan string dengan pilihan di radio button
+    if kategori_pilihan == "Tanya Promo dan Pembayaran":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
         db_string = df_database[valid_cols].to_csv(index=False)
@@ -77,7 +78,8 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     model = genai.GenerativeModel("models/gemini-3.1-flash-lite")
     
     # 5. Prompt Super Pintar 
-    if kategori_pilihan == "Tanya Promo":
+    # PERBAIKAN: Menyesuaikan string dengan pilihan di radio button
+    if kategori_pilihan == "Tanya Promo dan Pembayaran":
         instruksi_khusus = """
     2. Cari kecocokannya di DATABASE PROMO di atas.
     3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
@@ -243,7 +245,8 @@ def run_chatbot_app():
         # Jika sudah milih, baru jalankan semua logika chat
         
         # --- AMBIL DATA DARI G-SHEET BERDASARKAN KATEGORI ---
-        if kategori_pilihan == "Tanya Promo":
+        # PERBAIKAN: Menyesuaikan string dengan pilihan di radio button
+        if kategori_pilihan == "Tanya Promo dan Pembayaran":
             df_active = get_database_df(gc, SHEET_KEY, "promo")
             placeholder_text = "Ketik info promo yang dicari..."
         else:
