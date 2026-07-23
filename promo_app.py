@@ -3,7 +3,6 @@ import streamlit as st
 import gspread
 import pandas as pd
 from google import genai
-from google.genai import types
 
 # ==========================================================
 # === 1. FUNGSI LOGIN & AUTENTIKASI ===
