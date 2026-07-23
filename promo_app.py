@@ -2,10 +2,11 @@ import os
 import streamlit as st
 import gspread
 import pandas as pd
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # ==========================================================
-# === FUNGSI LOGIN (TIDAK BERUBAH) ===
+# === 1. FUNGSI LOGIN & AUTENTIKASI ===
 # ==========================================================
 def login_form():
     if "authenticated" not in st.session_state:
@@ -42,7 +43,7 @@ def login_form():
                     st.error("Username atau Password salah.")
 
 # ==========================================================
-# === "OTAK AI" (DIPERBAIKI: ATURAN MUTLAK CICILAN) ===
+# === 2. DATABASE & OTAK AI ENGINE ===
 # ==========================================================
 @st.cache_data(ttl=300) 
 def get_database_df(_gc, sheet_key, worksheet_name): 
@@ -55,29 +56,26 @@ def get_database_df(_gc, sheet_key, worksheet_name):
         st.error(f"❌ Gagal memuat data Sheets '{worksheet_name}'. Error: {e}")
         st.stop()
 
-def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str):
+def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str):
     """
-    Fungsi Otak AI (Versi Hybrid Promo & MOP)
+    Fungsi Otak AI KOZY (Menggunakan SDK Google GenAI Resmi Terbaru)
     """
-    # 1. Pilih kolom 
-    if kategori_pilihan == "Tanya Promo":
+    # 1. Penyiapan Filter Kolom Database
+    if kategori_pilihan == "Tanya Promo dan Pembayaran":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
         db_string = df_database[valid_cols].to_csv(index=False)
     else: 
         db_string = df_database.to_csv(index=False)
 
-    # 3. Siapkan riwayat chat 
+    # 2. Siapkan Riwayat Chat Terakhir (Safe Parameter Parsing)
     history = "\n".join([
         f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
-        for msg in st.session_state.messages[-3:] 
+        for msg in chat_messages[-3:] 
     ])
 
-    # 4. Inisialisasi Model
-    model = genai.GenerativeModel("models/gemini-3.1-flash-lite")
-    
-    # 5. Prompt Super Pintar 
-    if kategori_pilihan == "Tanya Promo":
+    # 3. Prompt Khusus per Kategori
+    if kategori_pilihan == "Tanya Promo dan Pembayaran":
         instruksi_khusus = """
     2. Cari kecocokannya di DATABASE PROMO di atas.
     3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
@@ -119,13 +117,17 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
     """
 
     try:
-        response = model.generate_content(gemini_prompt)
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model='gemini-3.5-flash-lite',
+            contents=gemini_prompt
+        )
         return response.text.strip()
     except Exception as e:
-        return "Duh, sinyal Kozy lagi putus-putus nih. Tanya lagi dong."
+        return f"Duh, sinyal Kozy lagi putus-putus nih ({e}). Tanya lagi dong."
 
 # ==========================================================
-# === APLIKASI CHATBOT UTAMA ===
+# === 3. APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
     # --- KONFIGURASI API DAN SHEETS ---
@@ -137,8 +139,6 @@ def run_chatbot_app():
     if not API_KEY:
         st.error("❌ API key Gemini tidak ditemukan. Tambahkan secret 'GEMINI_API_KEY' di Streamlit Secrets.")
         st.stop()
-
-    genai.configure(api_key=API_KEY)
 
     if "gcp_service_account" not in st.secrets:
         st.error("❌ Service account Google Sheets tidak ditemukan di Streamlit Secrets.")
@@ -159,9 +159,7 @@ def run_chatbot_app():
     # --- KONFIGURASI HALAMAN ---
     st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
 
-    # ==========================================================
-    # === CSS KUSTOM (SESUAI PERMINTAAN: TIDAK BERUBAH) ===
-    # ==========================================================
+    # --- CSS KUSTOM ---
     st.markdown(
         """
         <style>
@@ -208,9 +206,9 @@ def run_chatbot_app():
         unsafe_allow_html=True
     )
 
-    # --- HEADER APLIKASI (TIDAK BERUBAH) ---
+    # --- HEADER APLIKASI ---
     st.markdown(
-        f"""
+        """
         <div style='text-align: center; margin-bottom: 0.5rem;'>
             <img src="https://raw.githubusercontent.com/fajarachmad15/Azko-Promo-Bot/main/azko-logo-white-on-red.png" alt="AZKO Logo" style="width: 50px; margin-bottom: 0.5rem;">
             <h1 style='margin-bottom: 0.2rem; font-size: 2.2rem;'>Kozy – Asisten Kasir AZKO</h1>
@@ -221,11 +219,9 @@ def run_chatbot_app():
         unsafe_allow_html=True
     )
 
-    st.markdown("---") # Garis pemisah visual
+    st.markdown("---") 
 
-    # ==========================================================
-    # === FITUR BARU: WAJIB PILIH KATEGORI (INDEX=NONE) ===
-    # ==========================================================
+    # --- FITUR WAJIB PILIH KATEGORI ---
     kategori_pilihan = st.radio(
         "Pilih kategori bantuan yang dibutuhkan:",
         ("Tanya Promo dan Pembayaran", "Kategori MOP & EDC"),
@@ -233,17 +229,11 @@ def run_chatbot_app():
         index=None 
     )
 
-    # ==========================================================
-    # === LOGIKA TAMPILAN BERSYARAT (KOLOM CHAT DIUMPETIN) ===
-    # ==========================================================
+    # --- LOGIKA TAMPILAN BERSYARAT ---
     if kategori_pilihan is None:
-        # Tampilkan pesan statis jika belum memilih
         st.info("👆 Silakan pilih kategori bantuan di atas terlebih dahulu untuk memulai obrolan dengan Kozy.")
     else:
-        # Jika sudah milih, baru jalankan semua logika chat
-        
-        # --- AMBIL DATA DARI G-SHEET BERDASARKAN KATEGORI ---
-        if kategori_pilihan == "Tanya Promo":
+        if kategori_pilihan == "Tanya Promo dan Pembayaran":
             df_active = get_database_df(gc, SHEET_KEY, "promo")
             placeholder_text = "Ketik info promo yang dicari..."
         else:
@@ -255,11 +245,6 @@ def run_chatbot_app():
             st.session_state.messages = [
                 {"role": "assistant", "content": "Halo! Aku Kozy. Silakan ketik pertanyaanmu di bawah ya! 🧐"}
             ]
-        
-        if "context" in st.session_state:
-            del st.session_state["context"]
-        if "last_intent" in st.session_state:
-            del st.session_state["last_intent"]
 
         # --- UI CHAT ---
         for msg in st.session_state.messages:
@@ -268,25 +253,28 @@ def run_chatbot_app():
 
         # --- INPUT CHAT ---
         if prompt := st.chat_input(placeholder_text):
-            # 1. Tampilkan pertanyaan user
             st.chat_message("user").markdown(prompt)
             st.session_state.messages.append({"role": "user", "content": prompt})
 
-            # 2. Panggil "Otak AI" dengan menyertakan Kategori
             try:
                 with st.spinner("Kozy lagi mikir..."):
-                    answer = get_ai_response(prompt, df_active, kategori_pilihan) 
-            
+                    answer = get_ai_response(
+                        prompt=prompt, 
+                        df_database=df_active, 
+                        kategori_pilihan=kategori_pilihan,
+                        chat_messages=st.session_state.messages,
+                        api_key=API_KEY
+                    ) 
             except Exception as e:
                 st.error(f"Duh, ada error: {e}")
                 answer = "Maaf, lagi ada gangguan. Coba lagi ya."
 
-            # 3. Tampilkan jawaban AI
             with st.chat_message("assistant"):
                 st.markdown(answer)
             st.session_state.messages.append({"role": "assistant", "content": answer})
 
 # ==========================================================
-# === TITIK MASUK APLIKASI (TIDAK BERUBAH) ===
+# === TITIK MASUK APLIKASI ===
 # ==========================================================
-login_form()
+if __name__ == "__main__":
+    login_form()
