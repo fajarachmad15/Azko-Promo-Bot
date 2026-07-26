@@ -130,9 +130,9 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 
     try:
         client = genai.Client(api_key=api_key)
-        # Menggunakan nama model standar resmi Gemini SDK (gemini-2.5-flash)
+        # Menggunakan nama model standar resmi Gemini SDK (gemini-3.5-flash-lite)
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash-lite',
             contents=gemini_prompt
         )
         return response.text.strip()
