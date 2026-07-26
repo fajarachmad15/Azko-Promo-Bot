@@ -5,6 +5,11 @@ import pandas as pd
 from google import genai
 
 # ==========================================================
+# === KONFIGURASI UTAMA HALAMAN (WAJIB PERTAMA KALI) ===
+# ==========================================================
+st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
+
+# ==========================================================
 # === 1. FUNGSI LOGIN & AUTENTIKASI ===
 # ==========================================================
 def login_form():
@@ -14,7 +19,6 @@ def login_form():
     if st.session_state.authenticated:
         run_chatbot_app()
     else:
-        st.set_page_config(page_title="Login - Kozy", page_icon="🔒", layout="centered")
         st.title("🔒 Silakan Login")
         st.write("Masukkan kredensial untuk mengakses Kozy Asisten Kasir.")
 
@@ -24,17 +28,16 @@ def login_form():
             submitted = st.form_submit_button("Login")
 
             if submitted:
-                try:
-                    correct_user = st.secrets["app_credentials"]["APP_USER"]
-                    correct_pass = st.secrets["app_credentials"]["APP_PASS"]
-                except KeyError:
-                    st.error("Kredensial aplikasi belum di-setting di secrets.toml")
-                    return
-                except Exception as e:
-                    st.error(f"Error saat membaca secrets: {e}")
+                # Validasi pembacaan secrets yang aman
+                app_creds = st.secrets.get("app_credentials", {})
+                correct_user = app_creds.get("APP_USER")
+                correct_pass = app_creds.get("APP_PASS")
+
+                if not correct_user or not correct_pass:
+                    st.error("❌ Kredensial aplikasi (APP_USER / APP_PASS) belum di-setting atau kosong di secrets.toml")
                     return
 
-                if username == correct_user and password == correct_pass:
+                if username.strip() == str(correct_user).strip() and password == str(correct_pass):
                     st.session_state.authenticated = True
                     st.success("Login berhasil! Memuat aplikasi...")
                     st.rerun()
@@ -44,81 +47,92 @@ def login_form():
 # ==========================================================
 # === 2. DATABASE & OTAK AI ENGINE ===
 # ==========================================================
-@st.cache_data(ttl=300) 
-def get_database_df(_gc, sheet_key, worksheet_name): 
+@st.cache_data(ttl=300)
+def get_database_df(_gc, sheet_key, worksheet_name):
     """Mengambil dan men-cache DataFrame dari Google Sheets berdasarkan nama worksheet."""
     try:
-        sheet = _gc.open_by_key(sheet_key).worksheet(worksheet_name) 
-        df = pd.DataFrame(sheet.get_all_records())
+        sheet = _gc.open_by_key(sheet_key).worksheet(worksheet_name)
+        records = sheet.get_all_records()
+        if not records:
+            return pd.DataFrame()
+        df = pd.DataFrame(records)
+        # Pembersihan header kolom dan nilai NaN
+        df.columns = [str(col).strip() for col in df.columns]
+        df = df.fillna("")
         return df
     except Exception as e:
-        st.error(f"❌ Gagal memuat data Sheets '{worksheet_name}'. Error: {e}")
-        st.stop()
+        raise RuntimeError(f"Gagal mengambil data dari worksheet '{worksheet_name}': {e}")
 
 def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str):
     """
     Fungsi Otak AI KOZY (Menggunakan SDK Google GenAI Resmi Terbaru)
     """
+    if df_database.empty:
+        return "Maaf, data database untuk kategori ini sedang kosong atau tidak dapat diakses."
+
     # 1. Penyiapan Filter Kolom Database
     if kategori_pilihan == "Tanya Promo dan Pembayaran":
         kolom_tampil = ['NAMA_PROMO', 'PROMO_STATUS', 'PERIODE', 'SYARAT_UTAMA', 'DETAIL_DISKON', 'BANK_PARTNER']
         valid_cols = [k for k in kolom_tampil if k in df_database.columns]
-        db_string = df_database[valid_cols].to_csv(index=False)
-    else: 
+        if valid_cols:
+            db_string = df_database[valid_cols].to_csv(index=False)
+        else:
+            db_string = df_database.to_csv(index=False)
+    else:
         db_string = df_database.to_csv(index=False)
 
-    # 2. Siapkan Riwayat Chat Terakhir (Safe Parameter Parsing)
+    # 2. Siapkan Riwayat Chat Terakhir (Eksklusi prompt baru agar tidak duplikasi)
+    past_messages = chat_messages[:-1] if chat_messages else []
     history = "\n".join([
-        f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}" 
-        for msg in chat_messages[-3:] 
-    ])
+        f"{'User' if msg['role'] == 'user' else 'Kozy'}: {msg['content']}"
+        for msg in past_messages[-3:]
+    ]) if past_messages else "Belum ada riwayat sebelumnya."
 
     # 3. Prompt Khusus per Kategori
     if kategori_pilihan == "Tanya Promo dan Pembayaran":
-        instruksi_khusus = """
-    2. Cari kecocokannya di DATABASE PROMO di atas.
-    3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.
-    4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini.
-    5. ATURAN WAJIB: Di akhir SETIAP jawabanmu mengenai promo (baik promo itu ada maupun tidak ada), kamu WAJIB menambahkan kalimat persis seperti ini: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
-        """
+        instruksi_khusus = (
+            "2. Cari kecocokannya di DATABASE PROMO di atas.\n"
+            "3. Jika promo DITEMUKAN: Jelaskan Nama Promo, Detail Diskon, dan Syarat Utama dengan format bullet points yang rapi dan bahasa yang santai tapi jelas.\n"
+            "4. Jika promo TIDAK DITEMUKAN di database: Katakan mohon maaf dengan sopan bahwa promo untuk bank/item tersebut belum tersedia saat ini.\n"
+            "5. ATURAN WAJIB: Di akhir SETIAP jawabanmu mengenai promo (baik promo itu ada maupun tidak ada), kamu WAJIB menambahkan kalimat persis seperti ini: \"Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊\""
+        )
     else:
-        instruksi_khusus = """
-    2. ATURAN MUTLAK SOAL CICILAN (OVERRIDE): Jika pertanyaan user mengandung kata "cicil" atau "cicilan", BATALKAN semua pencarian instruksi dari database. JANGAN berikan nama EDC atau MOP pengganti sama sekali karena ini sangat berisiko untuk customer. Langsung berikan jawaban yang ramah bahwa untuk kendala mesin terkait transaksi cicilan atau pengajuan cicilan manual, kasir harus melapor ke atasan, lalu AKHIRI DENGAN KALIMAT PERSIS INI: "Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊"
-    3. TUGAS UTAMA (PERTANYAAN NORMAL BUKAN CICILAN): 
-       - Jika user menyebutkan nama bank tapi TIDAK MENYEBUTKAN jenis transaksinya (Debit/Kredit/QR), JANGAN ASUMSI HANYA SATU JENIS. 
-       - Carilah SEMUA baris (Debit, Kredit, QR) yang berkaitan dengan bank tersebut (jika tidak ada spesifik, cek kategori 'BANK LAIN').
-       - Rangkum jawabannya dengan menyebutkan "EDC Yang digunakan" dan "Pilihan MOP Sesuai Type" untuk MASING-MASING jenis transaksi (Debit dan Kredit) agar kasir tahu semua opsinya.
-       - Jika user SUDAH menyebutkan jenis transaksinya secara spesifik (misal: "debit bca"), barulah jawab untuk jenis itu saja.
-    4. SKENARIO ERROR/GANGGUAN (BUKAN CICILAN):
-       - Jika user bertanya tentang solusi saat EDC gangguan/error untuk suatu bank, JANGAN HANYA MENCARI SATU BARIS.
-       - Carilah SEMUA baris di database (seperti Kartu Debit, Kartu Kredit, atau QR) yang berkaitan dengan bank tersebut.
-       - BACA instruksi pengganti yang ada di kolom yang berisi kata 'NOTE' pada masing-masing baris tersebut.
-       - Rangkum jawabannya dengan gaya bahasa yang luwes dan interaktif seperti asisten sungguhan.
-    5. Jika di kolom 'NOTE' berisi teks "Tidak ada alternatif pengganti EDC", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya.
-        """
+        instruksi_khusus = (
+            "2. ATURAN MUTLAK SOAL CICILAN (OVERRIDE): Jika pertanyaan user mengandung kata \"cicil\" atau \"cicilan\", BATALKAN semua pencarian instruksi dari database. JANGAN berikan nama EDC atau MOP pengganti sama sekali karena ini sangat berisiko untuk customer. Langsung berikan jawaban yang ramah bahwa untuk kendala mesin terkait transaksi cicilan atau pengajuan cicilan manual, kasir harus melapor ke atasan, lalu AKHIRI DENGAN KALIMAT PERSIS INI: \"Untuk informasi lebih lanjut silahkan bertanya ke Finrep Area kamu ya 😊\"\n"
+            "3. TUGAS UTAMA (PERTANYAAN NORMAL BUKAN CICILAN):\n"
+            "   - Jika user menyebutkan nama bank tapi TIDAK MENYEBUTKAN jenis transaksinya (Debit/Kredit/QR), JANGAN ASUMSI HANYA SATU JENIS.\n"
+            "   - Carilah SEMUA baris (Debit, Kredit, QR) yang berkaitan dengan bank tersebut (jika tidak ada spesifik, cek kategori 'BANK LAIN').\n"
+            "   - Rangkum jawabannya dengan menyebutkan \"EDC Yang digunakan\" dan \"Pilihan MOP Sesuai Type\" untuk MASING-MASING jenis transaksi (Debit dan Kredit) agar kasir tahu semua opsinya.\n"
+            "   - Jika user SUDAH menyebutkan jenis transaksinya secara spesifik (misal: \"debit bca\"), barulah jawab untuk jenis itu saja.\n"
+            "4. SKENARIO ERROR/GANGGUAN (BUKAN CICILAN):\n"
+            "   - Jika user bertanya tentang solusi saat EDC gangguan/error untuk suatu bank, JANGAN HANYA MENCARI SATU BARIS.\n"
+            "   - Carilah SEMUA baris di database (seperti Kartu Debit, Kartu Kredit, atau QR) yang berkaitan dengan bank tersebut.\n"
+            "   - BACA instruksi pengganti yang ada di kolom yang berisi kata 'NOTE' pada masing-masing baris tersebut.\n"
+            "   - Rangkum jawabannya dengan gaya bahasa yang luwes dan interaktif seperti asisten sungguhan.\n"
+            "5. Jika di kolom 'NOTE' berisi teks \"Tidak ada alternatif pengganti EDC\", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya."
+        )
 
-    gemini_prompt = f"""
-    Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
-    Konteks saat ini: Kasir sedang bertanya seputar {kategori_pilihan}.
-    
-    DATABASE SAAT INI:
-    {db_string}
+    gemini_prompt = f"""Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
+Konteks saat ini: Kasir sedang bertanya seputar {kategori_pilihan}.
 
-    RIWAYAT CHAT:
-    {history}
+DATABASE SAAT INI:
+{db_string}
 
-    PERTANYAAN BARU USER: "{prompt}"
-    
-    INSTRUKSI KERJA (WAJIB DIIKUTI):
-    1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan sesuai kategori yang dipilih.
-    {instruksi_khusus}
-    6. DILARANG KERAS mengarang/menghalusinasi data yang tidak ada di dalam database.
-    """
+RIWAYAT CHAT SEBELUMNYA:
+{history}
+
+PERTANYAAN BARU USER: "{prompt.strip()}"
+
+INSTRUKSI KERJA (WAJIB DIIKUTI):
+1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan sesuai kategori yang dipilih.
+{instruksi_khusus}
+6. DILARANG KERAS mengarang/menghalusinasi data yang tidak ada di dalam database."""
 
     try:
         client = genai.Client(api_key=api_key)
+        # Menggunakan nama model standar resmi Gemini SDK (gemini-2.5-flash)
         response = client.models.generate_content(
-            model='gemini-3.5-flash-lite',
+            model='gemini-2.5-flash',
             contents=gemini_prompt
         )
         return response.text.strip()
@@ -129,6 +143,13 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
 # === 3. APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
+    # --- SIDEBAR & LOGOUT ---
+    with st.sidebar:
+        st.write("👤 **Status:** Terautentikasi")
+        if st.button("🚪 Logout", key="logout_button"):
+            st.session_state.authenticated = False
+            st.rerun()
+
     # --- KONFIGURASI API DAN SHEETS ---
     API_KEY = (
         st.secrets.get("GEMINI_API_KEY")
@@ -140,23 +161,23 @@ def run_chatbot_app():
         st.stop()
 
     if "gcp_service_account" not in st.secrets:
-        st.error("❌ Service account Google Sheets tidak ditemukan di Streamlit Secrets.")
+        st.error("❌ Service account Google Sheets ('gcp_service_account') tidak ditemukan di Streamlit Secrets.")
         st.stop()
 
     try:
         gcp = dict(st.secrets["gcp_service_account"])
+        # Format penanganan newline pada private key jika disimpan sebagai string literal '\\n'
+        if "private_key" in gcp and isinstance(gcp["private_key"], str):
+            gcp["private_key"] = gcp["private_key"].replace("\\n", "\n")
         gc = gspread.service_account_from_dict(gcp)
     except Exception as e:
-        st.error(f"❌ Gagal memuat kredensial GCP: {e}")
+        st.error(f"❌ Gagal memuat kredensial GCP Service Account: {e}")
         st.stop()
 
     SHEET_KEY = st.secrets.get("SHEET_KEY")
     if not SHEET_KEY:
-        st.error("Tambahkan 'SHEET_KEY' di Streamlit Secrets.")
+        st.error("❌ 'SHEET_KEY' tidak ditemukan di Streamlit Secrets.")
         st.stop()
-
-    # --- KONFIGURASI HALAMAN ---
-    st.set_page_config(page_title="Kozy - Asisten Kasir AZKO", page_icon="🛍️", layout="centered")
 
     # --- CSS KUSTOM ---
     st.markdown(
@@ -228,18 +249,33 @@ def run_chatbot_app():
         index=None 
     )
 
+    # Management State Pergantian Kategori
+    if "current_kategori" not in st.session_state:
+        st.session_state.current_kategori = kategori_pilihan
+    elif st.session_state.current_kategori != kategori_pilihan:
+        st.session_state.current_kategori = kategori_pilihan
+        # Reset chat history saat kategori berubah agar context AI tidak tercemar
+        if kategori_pilihan is not None:
+            st.session_state.messages = [
+                {"role": "assistant", "content": f"Kategori diubah ke **{kategori_pilihan}**. Silakan ketik pertanyaanmu! 🧐"}
+            ]
+
     # --- LOGIKA TAMPILAN BERSYARAT ---
     if kategori_pilihan is None:
         st.info("👆 Silakan pilih kategori bantuan di atas terlebih dahulu untuk memulai obrolan dengan Kozy.")
     else:
-        if kategori_pilihan == "Tanya Promo dan Pembayaran":
-            df_active = get_database_df(gc, SHEET_KEY, "promo")
-            placeholder_text = "Ketik info promo yang dicari..."
-        else:
-            df_active = get_database_df(gc, SHEET_KEY, "MOP") 
-            placeholder_text = "Tanya soal mesin EDC atau MOP di sini..."
+        try:
+            if kategori_pilihan == "Tanya Promo dan Pembayaran":
+                df_active = get_database_df(gc, SHEET_KEY, "promo")
+                placeholder_text = "Ketik info promo yang dicari..."
+            else:
+                df_active = get_database_df(gc, SHEET_KEY, "MOP") 
+                placeholder_text = "Tanya soal mesin EDC atau MOP di sini..."
+        except Exception as err:
+            st.error(f"❌ {err}")
+            st.stop()
 
-        # --- STATE INISIALISASI ---
+        # --- STATE INISIALISASI CHAT ---
         if "messages" not in st.session_state:
             st.session_state.messages = [
                 {"role": "assistant", "content": "Halo! Aku Kozy. Silakan ketik pertanyaanmu di bawah ya! 🧐"}
