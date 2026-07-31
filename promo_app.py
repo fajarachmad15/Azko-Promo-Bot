@@ -129,7 +129,7 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
 
     instruksi_audio = ""
     if media_paths:
-        instruksi_audio = "\n\n[CATATAN PENTING: User telah mengirimkan pesan suara (voice note). Abaikan teks pertanyaan jika hanya berisi '*(Mengirim Voice Note)*'. Kamu WAJIB mendengarkan file audio yang terlampir dan jadikan itu sebagai pertanyaan utamanya!]"
+        instruksi_audio = "\n\n[CATATAN PENTING: User bertanya menggunakan PESAN SUARA (Audio). Abaikan teks '*(Mengirim Voice Note)*'. Dengarkan audionya dan langsung jawab sesuai suara tersebut. DILARANG KERAS mengatakan 'kamu belum mengetik pertanyaan' atau menyuruh user mengetik, karena mereka sedang menggunakan fitur suara!]"
 
     gemini_prompt = f"""Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
 Konteks saat ini: Kasir sedang bertanya seputar {kategori_pilihan}.
