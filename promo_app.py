@@ -1,9 +1,24 @@
 import os
+import time
 import streamlit as st
 import gspread
 import pandas as pd
 from google import genai
 
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def cleanup_old_files():
+    """Hapus file di folder uploads yang umurnya lebih dari 12 jam"""
+    now = time.time()
+    for filename in os.listdir(UPLOAD_DIR):
+        filepath = os.path.join(UPLOAD_DIR, filename)
+        if os.path.isfile(filepath):
+            if now - os.path.getmtime(filepath) > 12 * 3600:
+                try:
+                    os.remove(filepath)
+                except Exception:
+                    pass
 # ==========================================================
 # === KONFIGURASI UTAMA HALAMAN (WAJIB PERTAMA KALI) ===
 # ==========================================================
@@ -63,7 +78,7 @@ def get_database_df(_gc, sheet_key, worksheet_name):
     except Exception as e:
         raise RuntimeError(f"Gagal mengambil data dari worksheet '{worksheet_name}': {e}")
 
-def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str):
+def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str, media_paths: list = None):
     """
     Fungsi Otak AI KOZY (Menggunakan SDK Google GenAI Resmi Terbaru)
     """
@@ -112,6 +127,10 @@ def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: st
             "5. Jika di kolom 'NOTE' berisi teks \"Tidak ada alternatif pengganti EDC\", beritahu kasir secara sopan bahwa memang tidak ada mesin penggantinya."
         )
 
+    instruksi_audio = ""
+    if media_paths:
+        instruksi_audio = "\n\n[CATATAN PENTING: User telah mengirimkan pesan suara (voice note). Abaikan teks pertanyaan jika hanya berisi '*(Mengirim Voice Note)*'. Kamu WAJIB mendengarkan file audio yang terlampir dan jadikan itu sebagai pertanyaan utamanya!]"
+
     gemini_prompt = f"""Kamu adalah Kozy, asisten kasir internal AZKO yang ramah, asyik, dan selalu siap membantu.
 Konteks saat ini: Kasir sedang bertanya seputar {kategori_pilihan}.
 
@@ -121,7 +140,7 @@ DATABASE SAAT INI:
 RIWAYAT CHAT SEBELUMNYA:
 {history}
 
-PERTANYAAN BARU USER: "{prompt.strip()}"
+PERTANYAAN BARU USER: "{prompt.strip()}"{instruksi_audio}
 
 INSTRUKSI KERJA (WAJIB DIIKUTI):
 1. Jika user HANYA menyapa (misal: "halo", "pagi", "woy", "test"), balaslah sapaan tersebut dengan ramah ala sesama rekan kerja, lalu tawarkan bantuan sesuai kategori yang dipilih.
@@ -130,10 +149,17 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 
     try:
         client = genai.Client(api_key=api_key)
+        
+        contents_to_send = [gemini_prompt]
+        if media_paths:
+            for path in media_paths:
+                gemini_file = client.files.upload(file=path)
+                contents_to_send.append(gemini_file)
+                
         # Menggunakan nama model standar resmi Gemini SDK (gemini-3.5-flash-lite)
         response = client.models.generate_content(
             model='gemini-3.5-flash-lite',
-            contents=gemini_prompt
+            contents=contents_to_send
         )
         return response.text.strip()
     except Exception as e:
@@ -143,6 +169,9 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 # === 3. APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
+    # Jalankan pembersihan file usang setiap kali app dimuat
+    cleanup_old_files()
+    
     # --- SIDEBAR & LOGOUT ---
     with st.sidebar:
         st.write("👤 **Status:** Terautentikasi")
@@ -221,6 +250,14 @@ def run_chatbot_app():
             flex-direction: row;
             justify-content: center;
         }
+        
+        /* Responsif untuk layar kecil/HP */
+        @media (max-width: 768px) {
+            .css-1d391kg {
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True
@@ -286,19 +323,46 @@ def run_chatbot_app():
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-        # --- INPUT CHAT ---
-        if prompt := st.chat_input(placeholder_text):
-            st.chat_message("user").markdown(prompt)
-            st.session_state.messages.append({"role": "user", "content": prompt})
+        # --- VOICE NOTE ---
+        # Mic diletakkan persis di atas chat input
+        with st.popover("🎙️ Voice Note"):
+            with st.form("audio_form", clear_on_submit=True):
+                st.caption("💡 Setelah selesai merekam, pastikan Anda menekan tombol kirim di bawah ini.")
+                recorded_audio = st.audio_input("Rekam Suara")
+                submit_audio = st.form_submit_button("Kirim Voice Note 🚀")
+
+        # --- INPUT CHAT (Tanpa lampiran gambar) ---
+        chat_val = st.chat_input(placeholder_text)
+        
+        # Mengecek apakah ada trigger dari chat_input ATAU tombol kirim audio
+        if chat_val or submit_audio:
+            media_paths = []
+            display_prompt = ""
+
+            # Jika trigger dari st.chat_input
+            if chat_val:
+                display_prompt = chat_val
+            
+            # Jika trigger dari st.audio_input
+            if submit_audio and recorded_audio:
+                display_prompt = "*(Mengirim Voice Note)*"
+                audio_path = os.path.join(UPLOAD_DIR, f"audio_{int(time.time())}.wav")
+                with open(audio_path, "wb") as f:
+                    f.write(recorded_audio.read())
+                media_paths.append(audio_path)
+
+            st.chat_message("user").markdown(display_prompt)
+            st.session_state.messages.append({"role": "user", "content": display_prompt})
 
             try:
                 with st.spinner("Kozy lagi mikir..."):
                     answer = get_ai_response(
-                        prompt=prompt, 
+                        prompt=display_prompt, 
                         df_database=df_active, 
                         kategori_pilihan=kategori_pilihan,
                         chat_messages=st.session_state.messages,
-                        api_key=API_KEY
+                        api_key=API_KEY,
+                        media_paths=media_paths
                     ) 
             except Exception as e:
                 st.error(f"Duh, ada error: {e}")
