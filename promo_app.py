@@ -324,14 +324,18 @@ def run_chatbot_app():
                 st.markdown(msg["content"])
 
         # --- VOICE NOTE ---
-        # Mic diletakkan persis di atas chat input
         with st.popover("🎙️ Voice Note"):
-            with st.form("audio_form", clear_on_submit=True):
-                st.caption("💡 Setelah selesai merekam, pastikan Anda menekan tombol kirim di bawah ini.")
+            with st.form("audio_form"):
+                st.caption("💡 Setelah selesai merekam, tekan tombol kirim di bawah.")
                 recorded_audio = st.audio_input("Rekam Suara")
+                
+                # Simpan audio bytes ke session_state SEBELUM form clear saat submit
+                if recorded_audio:
+                    st.session_state["pending_audio_bytes"] = recorded_audio.read()
+                
                 submit_audio = st.form_submit_button("Kirim Voice Note 🚀")
 
-        # --- INPUT CHAT (Tanpa lampiran gambar) ---
+        # --- INPUT CHAT ---
         chat_val = st.chat_input(placeholder_text)
         
         # Mengecek apakah ada trigger dari chat_input ATAU tombol kirim audio
@@ -343,13 +347,22 @@ def run_chatbot_app():
             if chat_val:
                 display_prompt = chat_val
             
-            # Jika trigger dari st.audio_input
-            if submit_audio and recorded_audio:
-                display_prompt = "*(Mengirim Voice Note)*"
-                audio_path = os.path.join(UPLOAD_DIR, f"audio_{int(time.time())}.wav")
-                with open(audio_path, "wb") as f:
-                    f.write(recorded_audio.read())
-                media_paths.append(audio_path)
+            # Jika trigger dari voice note - baca dari session_state, BUKAN dari recorded_audio
+            if submit_audio:
+                audio_bytes = st.session_state.pop("pending_audio_bytes", None)
+                if audio_bytes:
+                    display_prompt = "*(Mengirim Voice Note)*"
+                    audio_path = os.path.join(UPLOAD_DIR, f"audio_{int(time.time())}.wav")
+                    with open(audio_path, "wb") as f:
+                        f.write(audio_bytes)
+                    media_paths.append(audio_path)
+                else:
+                    # Tidak ada audio yang direkam, beri tahu user
+                    st.warning("⚠️ Tidak ada rekaman suara. Silakan rekam dulu sebelum kirim.")
+                    st.stop()
+
+            if not display_prompt:
+                st.stop()
 
             st.chat_message("user").markdown(display_prompt)
             st.session_state.messages.append({"role": "user", "content": display_prompt})
