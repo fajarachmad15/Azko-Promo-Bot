@@ -324,31 +324,30 @@ def run_chatbot_app():
                 st.markdown(msg["content"])
 
         # --- VOICE NOTE ---
-        with st.popover("🎙️ Voice Note"):
-            with st.form("audio_form"):
-                st.caption("💡 Setelah selesai merekam, tekan tombol kirim di bawah.")
-                recorded_audio = st.audio_input("Rekam Suara")
-                
-                # Simpan audio bytes ke session_state SEBELUM form clear saat submit
-                if recorded_audio:
-                    st.session_state["pending_audio_bytes"] = recorded_audio.read()
-                
-                submit_audio = st.form_submit_button("Kirim Voice Note 🚀")
+        # Menggunakan expander (bukan form/popover) agar audio tidak hilang saat rerun
+        with st.expander("🎙️ Voice Note", expanded=False):
+            st.caption("💡 Rekam suara, lalu klik **Kirim Voice Note**.")
+            recorded_audio = st.audio_input("Rekam Suara", key="voice_recorder")
+            send_vn = st.button("Kirim Voice Note 🚀", key="send_vn")
+
+        # Simpan audio bytes ke session_state setiap kali ada rekaman baru
+        if recorded_audio:
+            st.session_state["pending_audio_bytes"] = recorded_audio.getvalue()
 
         # --- INPUT CHAT ---
         chat_val = st.chat_input(placeholder_text)
         
         # Mengecek apakah ada trigger dari chat_input ATAU tombol kirim audio
-        if chat_val or submit_audio:
+        if chat_val or send_vn:
             media_paths = []
             display_prompt = ""
 
-            # Jika trigger dari st.chat_input
+            # Jika trigger dari st.chat_input (ketik teks)
             if chat_val:
                 display_prompt = chat_val
             
-            # Jika trigger dari voice note - baca dari session_state, BUKAN dari recorded_audio
-            if submit_audio:
+            # Jika trigger dari voice note
+            if send_vn:
                 audio_bytes = st.session_state.pop("pending_audio_bytes", None)
                 if audio_bytes:
                     display_prompt = "*(Mengirim Voice Note)*"
@@ -357,7 +356,6 @@ def run_chatbot_app():
                         f.write(audio_bytes)
                     media_paths.append(audio_path)
                 else:
-                    # Tidak ada audio yang direkam, beri tahu user
                     st.warning("⚠️ Tidak ada rekaman suara. Silakan rekam dulu sebelum kirim.")
                     st.stop()
 
