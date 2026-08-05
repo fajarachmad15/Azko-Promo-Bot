@@ -145,13 +145,8 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 def run_chatbot_app():
     # --- MODEL MAPPING ---
     MODEL_MAP = {
-        "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite",
-        "Gemini 2.5 Flash": "gemini-2.5-flash",
-        "Gemini 3 Flash": "gemini-3-flash",
-        "Gemini 3.1 Flash Lite": "gemini-3.1-flash-lite",
-        "Gemini 3.5 Flash Lite": "gemini-3.5-flash-lite",
-        "Gemini 3.5 Flash": "gemini-3.5-flash",
-        "Gemini 3.6 Flash": "gemini-3.6-flash",
+        "gemini 3.1 flash lite": "gemini-3.1-flash-lite",
+        "gemini 3.5 flash lite": "gemini-3.5-flash-lite",
     }
 
     # --- SIDEBAR & LOGOUT ---
@@ -159,12 +154,10 @@ def run_chatbot_app():
         st.write("👤 **Status:** Terautentikasi")
         st.markdown("---")
         st.subheader("🤖 Pilihan Model")
-        model_options = list(MODEL_MAP.keys())
-        default_index = model_options.index("Gemini 3.5 Flash Lite") if "Gemini 3.5 Flash Lite" in model_options else 0
         selected_model_label = st.selectbox(
             "Model AI:",
-            options=model_options,
-            index=default_index,
+            options=["gemini 3.1 flash lite", "gemini 3.5 flash lite"],
+            index=1,
             help="Pilih model Gemini yang ingin digunakan."
         )
         selected_model = MODEL_MAP.get(selected_model_label, "gemini-3.5-flash-lite")
