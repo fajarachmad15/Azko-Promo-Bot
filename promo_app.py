@@ -63,7 +63,7 @@ def get_database_df(_gc, sheet_key, worksheet_name):
     except Exception as e:
         raise RuntimeError(f"Gagal mengambil data dari worksheet '{worksheet_name}': {e}")
 
-def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str):
+def get_ai_response(prompt: str, df_database: pd.DataFrame, kategori_pilihan: str, chat_messages: list, api_key: str, model_name: str = "gemini-3.5-flash-lite"):
     """
     Fungsi Otak AI KOZY (Menggunakan SDK Google GenAI Resmi Terbaru)
     """
@@ -130,9 +130,9 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 
     try:
         client = genai.Client(api_key=api_key)
-        # Menggunakan nama model standar resmi Gemini SDK (gemini-3.5-flash-lite)
+        # Menggunakan nama model yang dipilih
         response = client.models.generate_content(
-            model='gemini-3.5-flash-lite',
+            model=model_name,
             contents=gemini_prompt
         )
         return response.text.strip()
@@ -143,9 +143,25 @@ INSTRUKSI KERJA (WAJIB DIIKUTI):
 # === 3. APLIKASI CHATBOT UTAMA ===
 # ==========================================================
 def run_chatbot_app():
+    # --- MODEL MAPPING ---
+    MODEL_MAP = {
+        "gemini 3.1 flash lite": "gemini-3.1-flash-lite",
+        "gemini 3.5 flash lite": "gemini-3.5-flash-lite",
+    }
+
     # --- SIDEBAR & LOGOUT ---
     with st.sidebar:
         st.write("👤 **Status:** Terautentikasi")
+        st.markdown("---")
+        st.subheader("🤖 Pilihan Model")
+        selected_model_label = st.selectbox(
+            "Model AI:",
+            options=["gemini 3.1 flash lite", "gemini 3.5 flash lite"],
+            index=1,
+            help="Pilih model Gemini yang ingin digunakan."
+        )
+        selected_model = MODEL_MAP.get(selected_model_label, "gemini-3.5-flash-lite")
+        st.markdown("---")
         if st.button("🚪 Logout", key="logout_button"):
             st.session_state.authenticated = False
             st.rerun()
@@ -298,7 +314,8 @@ def run_chatbot_app():
                         df_database=df_active, 
                         kategori_pilihan=kategori_pilihan,
                         chat_messages=st.session_state.messages,
-                        api_key=API_KEY
+                        api_key=API_KEY,
+                        model_name=selected_model
                     ) 
             except Exception as e:
                 st.error(f"Duh, ada error: {e}")
